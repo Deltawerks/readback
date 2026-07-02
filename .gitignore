@@ -1,0 +1,9 @@
+node_modules/
+.readback/
+.voicebox/
+.env
+*.log
+.mcp.json
+hooks-snippet.json
+assets/readback.ico
+assets/voicebox.ico

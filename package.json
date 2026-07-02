@@ -1,0 +1,30 @@
+{
+  "name": "readback",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Windows-first, dual-provider (Inworld + ElevenLabs) voice output for Claude Code — reads Claude's replies aloud, tuned from a GUI panel.",
+  "license": "MIT",
+  "bin": {
+    "readback-mcp": "src/mcp-server.js"
+  },
+  "scripts": {
+    "mcp": "node src/mcp-server.js",
+    "panel": "node src/panel-server.js",
+    "say": "node scripts/say.js",
+    "voices": "node scripts/voices.js",
+    "register": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register.ps1",
+    "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Deltawerks/readback.git"
+  }
+}

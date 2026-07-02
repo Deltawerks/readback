@@ -1,0 +1,85 @@
+# Readback
+
+**Voice output for Claude Code.** Flip it on and Claude reads its replies aloud —
+so you can close your eyes and *listen* instead of staring at the terminal for
+hours. Flip it off (mid-sentence if you need to) and it's silent again.
+
+- 🪟 **Windows-first** — plays through built-in PowerShell audio, zero external
+  dependencies. (Most Claude voice tools are macOS-only.)
+- 🎚️ **Two providers** — [Inworld](https://inworld.ai) (hundreds of voices, cheap)
+  and [ElevenLabs](https://elevenlabs.io), switchable in a click.
+- 🖥️ **GUI-tunable** — a little control panel for voice, model, speed and
+  expression, with a live voice picker and in-app key entry. No `.env` fiddling.
+- ⚡ **Streaming** — splits replies into sentences and starts talking on the
+  first one, so audio kicks in fast even on long messages.
+
+> Unofficial community tool. Not affiliated with, or endorsed by, Anthropic,
+> Inworld, or ElevenLabs.
+
+---
+
+## How it works
+
+Three cooperating pieces sharing one state file:
+
+| Piece | Role |
+|------|------|
+| **MCP server** | in-chat toggle — `voice_on` / `voice_off` / `set_provider` / `set_voice` / `say` / `list_voices` … |
+| **Stop hook** | the actual voice — auto-speaks each reply while enabled |
+| **Control panel** | `localhost:7717` web cockpit for provider / voice / model / tuning + live preview |
+
+The hook and MCP toggle work whether or not the panel is open.
+
+## Setup (Windows, Node 18+)
+
+```powershell
+git clone https://github.com/Deltawerks/readback
+cd readback
+npm install
+npm run panel        # opens the control panel in your browser
+```
+
+In the panel: pick a **provider**, paste that provider's **API key**, choose a
+**voice**. Then wire it into Claude Code:
+
+```powershell
+npm run register     # writes .mcp.json + hooks-snippet.json for this folder
+```
+
+- **MCP server:** auto-loads when you work in this folder, or add it globally with
+  the `claude mcp add …` line `register` prints.
+- **Auto-speak hook:** merge the generated `hooks-snippet.json` into your Claude
+  Code `settings.json` (`~/.claude/settings.json` for every project), then restart
+  Claude Code.
+- **Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
+  launches the panel with one click.
+
+Quick smoke test without Claude Code:
+
+```powershell
+npm run say "readback is online"
+npm run voices        # list the active provider's voices
+```
+
+## Using it
+
+- In chat: say "voice on" and replies start speaking. "voice off" silences
+  instantly — including whatever's playing right then.
+- In the panel: switch provider, pick a voice, drag speed / expression, hit ▶ to
+  preview. Changes apply to the next spoken reply.
+
+Keys live in `.readback/secret.json` (gitignored, per-machine). Replies are
+cleaned before speaking (code blocks dropped, links flattened, markdown/emoji
+stripped) and long replies are truncated with a spoken "…the rest is on screen."
+
+## Notes & limits
+
+- Windows only (PowerShell `SoundPlayer` playback). No STT / voice input.
+- Speech is provider-agnostic WAV under the hood (Inworld LINEAR16; ElevenLabs
+  PCM wrapped in a WAV header), so the streaming player never cares which
+  provider you're on.
+- Trouble? Check `.readback/readback.log`.
+
+## License
+
+MIT — see [LICENSE](LICENSE).

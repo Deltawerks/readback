@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Readback</title>
+<style>
+  :root {
+    --bg: #060a14; --panel: #0b1220; --panel-2: #0e1626;
+    --line: #1b2b45; --line-soft: #142138;
+    --cyan: #4db8ff; --cyan-bright: #74d0ff; --cyan-dim: #2b6fa8;
+    --text: #d5e2f3; --muted: #6f83a3; --danger: #ff5a6a; --ok: #3ddc84; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #0c1830 0%, var(--bg) 60%) fixed;
+    color: var(--text); font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    display: flex; align-items: flex-start; justify-content: center; padding: 28px 16px 48px;
+  }
+  .wrap { width: 100%; max-width: 480px; }
+  .card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 0 0 1px rgba(77,184,255,0.04), 0 18px 50px rgba(0,0,0,0.55);
+    padding: 20px 20px 18px;
+  }
+  .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .logo { width: 40px; height: 40px; border-radius: 11px; background: radial-gradient(circle at 30% 25%, #12365c, #0a1a2e); border: 1px solid var(--line); display: grid; place-items: center; color: var(--cyan); box-shadow: 0 0 18px rgba(77,184,255,0.25) inset; }
+  .logo svg { width: 20px; height: 20px; }
+  .title { font-size: 19px; font-weight: 700; letter-spacing: 0.5px; }
+  .title .b { color: var(--cyan); }
+  .subtitle { font-size: 11.5px; color: var(--muted); letter-spacing: 1.4px; text-transform: uppercase; margin-top: 2px; }
+  .toggle { --w: 66px; --h: 32px; width: var(--w); height: var(--h); border-radius: 999px; position: relative; border: 1px solid var(--line); background: #0a1120; cursor: pointer; flex: none; transition: all .2s ease; padding: 0; }
+  .toggle .knob { position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #43506b; transition: all .2s ease; }
+  .toggle[aria-checked="true"] { background: linear-gradient(180deg, #10375c, #0c2843); border-color: var(--cyan-dim); box-shadow: 0 0 16px rgba(77,184,255,0.35); }
+  .toggle[aria-checked="true"] .knob { left: calc(var(--w) - 27px); background: var(--cyan-bright); box-shadow: 0 0 12px rgba(116,208,255,0.8); }
+  .rule { height: 1px; background: var(--line-soft); margin: 18px 0; }
+  label.lbl { display: block; font-size: 11px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--cyan); margin: 0 0 8px; font-weight: 600; }
+  select, input[type="text"], input[type="password"] { width: 100%; height: 42px; padding: 0 12px; color: var(--text); background: #0a111f; border: 1px solid var(--line); border-radius: var(--radius); font-size: 14px; font-family: inherit; outline: none; transition: border-color .15s, box-shadow .15s; }
+  select:focus, input:focus { border-color: var(--cyan-dim); box-shadow: 0 0 0 3px rgba(77,184,255,0.12); }
+  select { appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234db8ff' stroke-width='2'><path d='M6 9l6 6 6-6'/></svg>"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 34px; }
+  .seg { display: flex; gap: 6px; margin-bottom: 4px; }
+  .seg button { flex: 1; height: 40px; border-radius: var(--radius); border: 1px solid var(--line); background: #0a111f; color: var(--muted); font-size: 13.5px; cursor: pointer; font-family: inherit; transition: all .15s; }
+  .seg button.active { border-color: var(--cyan-dim); color: var(--cyan-bright); background: linear-gradient(180deg,#10375c,#0c2843); box-shadow: 0 0 12px rgba(77,184,255,.25); }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row.mb { margin-bottom: 18px; }
+  button.icon, button.btn { height: 42px; border-radius: var(--radius); border: 1px solid var(--line); background: #0c1626; color: var(--text); cursor: pointer; font-family: inherit; font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: all .15s; }
+  button.icon { width: 46px; flex: none; color: var(--cyan); }
+  button.btn { padding: 0 16px; }
+  button.icon:hover, button.btn:hover { border-color: var(--cyan-dim); box-shadow: 0 0 12px rgba(77,184,255,0.25); }
+  button:active { transform: scale(0.97); }
+  button svg { width: 17px; height: 17px; }
+  .slider { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+  .slider .lbl2 { width: 92px; font-size: 12px; color: var(--muted); letter-spacing: .5px; }
+  .slider output { min-width: 42px; text-align: right; font-size: 14px; font-weight: 600; color: var(--cyan-bright); }
+  input[type="range"] { -webkit-appearance: none; appearance: none; flex: 1; height: 4px; border-radius: 4px; background: #1a2740; outline: none; }
+  input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--cyan-bright); cursor: pointer; box-shadow: 0 0 10px rgba(116,208,255,0.7); border: none; }
+  input[type="range"]::-moz-range-thumb { width: 18px; height: 18px; border-radius: 50%; background: var(--cyan-bright); cursor: pointer; border: none; box-shadow: 0 0 10px rgba(116,208,255,0.7); }
+  .hint { font-size: 11.5px; color: var(--muted); margin: -6px 0 12px 106px; }
+  .switch-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .switch-row .lbl2 { font-size: 12px; color: var(--muted); letter-spacing: .5px; }
+  .toggle.sm { --w: 48px; --h: 26px; }
+  .toggle.sm .knob { width: 20px; height: 20px; }
+  .toggle.sm[aria-checked="true"] .knob { left: calc(var(--w) - 23px); }
+  .keyState { font-size: 11.5px; color: var(--muted); margin-top: 8px; display: flex; align-items: center; gap: 6px; }
+  .keyState.ok { color: var(--ok); }
+  .foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-size: 11.5px; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 8px currentColor; }
+  .dot.on { background: var(--ok); color: var(--ok); }
+  .dot.off { background: var(--muted); color: transparent; box-shadow: none; }
+  .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px); background: #0c1626; border: 1px solid var(--line); color: var(--text); padding: 10px 16px; border-radius: 10px; font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s ease; box-shadow: 0 10px 30px rgba(0,0,0,.5); max-width: 90vw; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.err { border-color: var(--danger); color: #ffd7db; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="head">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
+        </div>
+        <div>
+          <div class="title">read<span class="b">back</span></div>
+          <div class="subtitle">Claude Code voice</div>
+        </div>
+      </div>
+      <button id="toggle" class="toggle" role="switch" aria-checked="false" aria-label="Voice output on or off"><span class="knob"></span></button>
+    </div>
+
+    <div class="rule"></div>
+
+    <label class="lbl">Provider</label>
+    <div class="seg" id="providerSeg"></div>
+
+    <div class="rule"></div>
+
+    <label class="lbl" for="voice">Voice</label>
+    <div class="row mb">
+      <select id="voice"><option>Loading…</option></select>
+      <button id="preview" class="icon" aria-label="Preview voice" title="Preview"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
+    </div>
+
+    <label class="lbl" for="model">Model</label>
+    <div class="mb"><select id="model"></select></div>
+
+    <div id="tuning"></div>
+
+    <div class="rule"></div>
+
+    <div class="row">
+      <input type="text" id="testText" placeholder="Speak a test line…" />
+      <button id="speak" class="btn"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Speak</button>
+      <button id="stop" class="icon" aria-label="Stop playback" title="Stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
+    </div>
+
+    <div class="rule"></div>
+
+    <label class="lbl" id="keyLabel" for="apiKey">API key</label>
+    <div class="row">
+      <input type="password" id="apiKey" placeholder="Paste your key…" autocomplete="off" spellcheck="false" />
+      <button id="saveKey" class="btn">Save</button>
+    </div>
+    <div class="keyState" id="keyState">checking…</div>
+
+    <div class="foot">
+      <span id="dot" class="dot off"></span>
+      <span id="status">connecting…</span>
+    </div>
+  </div>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let state = {}, meta = {}, keys = {};
+const prov = () => state.provider;
+const cfg = () => state[state.provider] || {};
+
+function toast(msg, isErr) {
+  const t = $('toast');
+  t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
+  clearTimeout(toast._t); toast._t = setTimeout(() => (t.className = 'toast'), 2600);
+}
+async function api(path, opts) {
+  const res = await fetch(path, opts);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+function absorb(s) { meta = s.providers || meta; keys = s.keys || keys; delete s.providers; delete s.keys; state = s; }
+
+async function patchTop(body) {
+  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })); }
+  catch (e) { toast('Could not save: ' + e.message, true); }
+}
+async function patchConfig(config) {
+  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) })); }
+  catch (e) { toast('Could not save: ' + e.message, true); }
+}
+
+function renderProviders() {
+  const seg = $('providerSeg'); seg.innerHTML = '';
+  for (const [id, m] of Object.entries(meta)) {
+    const b = document.createElement('button');
+    b.textContent = m.label;
+    if (id === prov()) b.classList.add('active');
+    b.addEventListener('click', () => switchProvider(id));
+    seg.appendChild(b);
+  }
+}
+async function switchProvider(id) {
+  if (id === prov()) return;
+  await patchTop({ provider: id });
+  await renderAll();
+}
+function renderModels() {
+  const sel = $('model'); sel.innerHTML = '';
+  const models = (meta[prov()] && meta[prov()].models) || [];
+  const have = new Set();
+  const add = (id, label) => { if (have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().modelId) o.selected = true; sel.appendChild(o); };
+  if (cfg().modelId && !models.some((m) => m.id === cfg().modelId)) add(cfg().modelId, cfg().modelId);
+  for (const m of models) add(m.id, m.label);
+}
+function renderTuning() {
+  const box = $('tuning'); box.innerHTML = '';
+  const knobs = (meta[prov()] && meta[prov()].knobs) || [];
+  for (const k of knobs) {
+    if (k.type === 'toggle') {
+      const row = document.createElement('div'); row.className = 'switch-row';
+      const label = document.createElement('span'); label.className = 'lbl2'; label.textContent = k.label;
+      const on = !!cfg()[k.key];
+      const btn = document.createElement('button'); btn.className = 'toggle sm'; btn.setAttribute('role', 'switch'); btn.setAttribute('aria-checked', on ? 'true' : 'false'); btn.innerHTML = '<span class="knob"></span>';
+      btn.addEventListener('click', () => { const nv = btn.getAttribute('aria-checked') !== 'true'; btn.setAttribute('aria-checked', nv ? 'true' : 'false'); patchConfig({ [k.key]: nv }); });
+      row.appendChild(label); row.appendChild(btn); box.appendChild(row);
+      continue;
+    }
+    const row = document.createElement('div'); row.className = 'slider';
+    const label = document.createElement('span'); label.className = 'lbl2'; label.textContent = k.label;
+    const input = document.createElement('input'); input.type = 'range'; input.min = k.min; input.max = k.max; input.step = k.step;
+    const val = cfg()[k.key] != null ? cfg()[k.key] : k.min; input.value = val;
+    const out = document.createElement('output');
+    const fmt = (v) => Number(v).toFixed(k.step < 1 ? (k.step < 0.1 ? 2 : 1) : 0) + (k.suffix || '');
+    out.textContent = fmt(val);
+    let timer;
+    input.addEventListener('input', () => { out.textContent = fmt(input.value); clearTimeout(timer); timer = setTimeout(() => patchConfig({ [k.key]: Number(input.value) }), 250); });
+    row.appendChild(label); row.appendChild(input); row.appendChild(out); box.appendChild(row);
+    if (k.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = k.hint; box.appendChild(h); }
+  }
+}
+function renderKey() {
+  const m = meta[prov()] || {}; const k = keys[prov()] || {};
+  $('keyLabel').textContent = (m.label || '') + ' API key';
+  $('apiKey').value = '';
+  const el = $('keyState');
+  if (k.hasKey) { el.className = 'keyState ok'; el.textContent = 'key saved · ' + (k.hint || 'set'); }
+  else { el.className = 'keyState'; el.textContent = 'no ' + (m.label || '') + ' key yet — paste it above and hit Save'; }
+}
+function renderStatus() {
+  const on = !!state.enabled;
+  $('toggle').setAttribute('aria-checked', on ? 'true' : 'false');
+  $('dot').className = 'dot ' + (on ? 'on' : 'off');
+  $('status').textContent = (on ? 'voice on' : 'muted') + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (cfg().voiceId || 'no voice') + ' · localhost:' + location.port;
+}
+function fillVoices(voices) {
+  const sel = $('voice'); sel.innerHTML = '';
+  const have = new Set();
+  const add = (id, label) => { if (!id || have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().voiceId) o.selected = true; sel.appendChild(o); };
+  if (cfg().voiceId) add(cfg().voiceId, cfg().voiceId + (voices.length ? '' : ' (current)'));
+  for (const v of voices) add(v.voiceId, v.voiceId + ' — ' + (v.description || v.displayName || v.voiceId) + (v.gender ? ' (' + v.gender + ')' : ''));
+  if (!sel.options.length) sel.innerHTML = '<option value="">(add a key to load voices)</option>';
+}
+async function loadVoices() {
+  if (!(keys[prov()] && keys[prov()].hasKey)) { fillVoices([]); return; }
+  try { const { voices } = await api('/api/voices'); fillVoices(voices || []); }
+  catch (e) { fillVoices([]); toast('Could not load voices: ' + e.message, true); }
+}
+async function renderAll() {
+  renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus();
+  await loadVoices();
+}
+
+async function saveKey() {
+  const key = $('apiKey').value.trim();
+  if (!key) { toast('Paste a key first', true); return; }
+  try {
+    const r = await api('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov(), apiKey: key }) });
+    $('apiKey').value = '';
+    keys[prov()] = { hasKey: r.hasKey, hint: r.keyHint };
+    renderKey(); toast('Key saved');
+    await loadVoices();
+  } catch (e) { toast('Could not save key: ' + e.message, true); }
+}
+async function say(text) {
+  try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    if (r.ok) toast('Speaking…'); else toast('Nothing to speak', true);
+  } catch (e) { toast('Speak failed: ' + e.message, true); }
+}
+
+$('toggle').addEventListener('click', async () => { await patchTop({ enabled: !state.enabled }); renderStatus(); });
+$('voice').addEventListener('change', (e) => { patchConfig({ voiceId: e.target.value }); state[prov()].voiceId = e.target.value; renderStatus(); });
+$('model').addEventListener('change', (e) => { patchConfig({ modelId: e.target.value }); });
+$('preview').addEventListener('click', () => say('Hi, this is ' + (cfg().voiceId || 'the selected voice') + '. This is how I sound at these settings.'));
+$('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });
+$('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('speak').click(); });
+$('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }); toast('Stopped'); } catch (e) {} });
+$('saveKey').addEventListener('click', saveKey);
+$('apiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });
+
+(async function init() {
+  try { const s = await api('/api/state'); absorb(s); }
+  catch (e) { $('status').textContent = 'panel offline'; toast('Cannot reach the Readback server', true); return; }
+  await renderAll();
+})();
+</script>
+</body>
+</html>
