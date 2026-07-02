@@ -19,7 +19,9 @@ $mcpJson = @"
   }
 }
 "@
-Set-Content -Path (Join-Path $root ".mcp.json") -Value $mcpJson -Encoding UTF8
+# UTF-8 without BOM — a BOM makes the JSON invalid for strict parsers.
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllText((Join-Path $root ".mcp.json"), $mcpJson, $utf8NoBom)
 
 $hookJson = @"
 {
@@ -30,7 +32,7 @@ $hookJson = @"
   }
 }
 "@
-Set-Content -Path (Join-Path $root "hooks-snippet.json") -Value $hookJson -Encoding UTF8
+[System.IO.File]::WriteAllText((Join-Path $root "hooks-snippet.json"), $hookJson, $utf8NoBom)
 
 Write-Host "Wrote .mcp.json and hooks-snippet.json for:"
 Write-Host "  $root"
