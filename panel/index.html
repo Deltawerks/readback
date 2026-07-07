@@ -136,7 +136,7 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let state = {}, meta = {}, keys = {};
+let state = {}, meta = {}, keys = {}, voiceList = [];
 const prov = () => state.provider;
 const cfg = () => state[state.provider] || {};
 
@@ -222,13 +222,19 @@ function renderKey() {
   if (k.hasKey) { el.className = 'keyState ok'; el.textContent = 'key saved · ' + (k.hint || 'set'); }
   else { el.className = 'keyState'; el.textContent = 'no ' + (m.label || '') + ' key yet — paste it above and hit Save'; }
 }
+function voiceName() {
+  const v = voiceList.find((x) => x.voiceId === cfg().voiceId);
+  const dn = v ? (v.displayName || v.voiceId) : cfg().voiceId;
+  return dn ? String(dn).split(' - ')[0].trim() : '';
+}
 function renderStatus() {
   const on = !!state.enabled;
   $('toggle').setAttribute('aria-checked', on ? 'true' : 'false');
   $('dot').className = 'dot ' + (on ? 'on' : 'off');
-  $('status').textContent = (on ? 'voice on' : 'muted') + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (cfg().voiceId || 'no voice') + ' · localhost:' + location.port;
+  $('status').textContent = (on ? 'voice on' : 'muted') + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (voiceName() || 'no voice') + ' · localhost:' + location.port;
 }
 function fillVoices(voices) {
+  voiceList = voices || [];
   const sel = $('voice'); sel.innerHTML = '';
   const have = new Set();
   const add = (id, label) => { if (!id || have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().voiceId) o.selected = true; sel.appendChild(o); };
@@ -241,9 +247,10 @@ function fillVoices(voices) {
   if (!sel.options.length) sel.innerHTML = '<option value="">(add a key to load voices)</option>';
 }
 async function loadVoices() {
-  if (!(keys[prov()] && keys[prov()].hasKey)) { fillVoices([]); return; }
+  if (!(keys[prov()] && keys[prov()].hasKey)) { fillVoices([]); renderStatus(); return; }
   try { const { voices } = await api('/api/voices'); fillVoices(voices || []); }
   catch (e) { fillVoices([]); toast('Could not load voices: ' + e.message, true); }
+  renderStatus();
 }
 async function renderAll() {
   renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus();
@@ -270,7 +277,7 @@ async function say(text) {
 $('toggle').addEventListener('click', async () => { await patchTop({ enabled: !state.enabled }); renderStatus(); });
 $('voice').addEventListener('change', (e) => { patchConfig({ voiceId: e.target.value }); state[prov()].voiceId = e.target.value; renderStatus(); });
 $('model').addEventListener('change', (e) => { patchConfig({ modelId: e.target.value }); });
-$('preview').addEventListener('click', () => say('Hi, this is ' + (cfg().voiceId || 'the selected voice') + '. This is how I sound at these settings.'));
+$('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
 $('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });
 $('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('speak').click(); });
 $('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }); toast('Stopped'); } catch (e) {} });
