@@ -147,7 +147,11 @@ function toast(msg, isErr) {
 }
 async function api(path, opts) {
   const res = await fetch(path, opts);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
+  if (!res.ok) {
+    let detail = '';
+    try { const j = await res.json(); detail = j.error || j.reason || ''; } catch {}
+    throw new Error(detail || ('HTTP ' + res.status));
+  }
   return res.json();
 }
 function absorb(s) { meta = s.providers || meta; keys = s.keys || keys; delete s.providers; delete s.keys; state = s; }
@@ -228,8 +232,12 @@ function fillVoices(voices) {
   const sel = $('voice'); sel.innerHTML = '';
   const have = new Set();
   const add = (id, label) => { if (!id || have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().voiceId) o.selected = true; sel.appendChild(o); };
-  if (cfg().voiceId) add(cfg().voiceId, cfg().voiceId + (voices.length ? '' : ' (current)'));
-  for (const v of voices) add(v.voiceId, v.voiceId + ' — ' + (v.description || v.displayName || v.voiceId) + (v.gender ? ' (' + v.gender + ')' : ''));
+  for (const v of voices) {
+    const name = v.displayName || v.voiceId;
+    const desc = v.description ? ' — ' + v.description : '';
+    add(v.voiceId, name + desc + (v.gender ? ' (' + v.gender + ')' : ''));
+  }
+  if (cfg().voiceId && !have.has(cfg().voiceId)) add(cfg().voiceId, cfg().voiceId + ' (current)');
   if (!sel.options.length) sel.innerHTML = '<option value="">(add a key to load voices)</option>';
 }
 async function loadVoices() {

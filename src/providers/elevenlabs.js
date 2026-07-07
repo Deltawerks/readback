@@ -1,5 +1,18 @@
 import { fetchWithTimeout, sleep, pcmToWav } from './_http.js';
 
+// Pull ElevenLabs' human-readable message out of its JSON error body, so the
+// panel shows "missing permission voices_read" instead of a bare "HTTP 500".
+function elError(kind, status, detail) {
+  try {
+    const j = JSON.parse(detail);
+    const m = (j && j.detail && j.detail.message) || (j && j.message);
+    if (m) return `ElevenLabs ${kind} ${status}: ${m}`;
+  } catch {
+    // not JSON
+  }
+  return detail ? `ElevenLabs ${kind} ${status}: ${detail.slice(0, 140)}` : `ElevenLabs ${kind} ${status}`;
+}
+
 const TTS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
 const VOICES_URL = 'https://api.elevenlabs.io/v1/voices'; // account voices (matches AgentLink)
 const OUTPUT_FORMAT = 'pcm_24000'; // raw PCM → wrapped to WAV for the headless player
@@ -63,7 +76,7 @@ export async function synthesize(text, cfg, apiKey) {
       );
       if (!resp.ok) {
         const detail = await resp.text().catch(() => '');
-        throw new Error(`ElevenLabs TTS ${resp.status}: ${detail.slice(0, 200)}`);
+        throw new Error(elError('TTS', resp.status, detail));
       }
       const pcm = Buffer.from(await resp.arrayBuffer());
       return pcmToWav(pcm, { sampleRate: 24000, channels: 1, bitsPerSample: 16 });
@@ -80,7 +93,7 @@ export async function listVoices(apiKey) {
   const resp = await fetchWithTimeout(VOICES_URL, { headers: { 'xi-api-key': apiKey } });
   if (!resp.ok) {
     const detail = await resp.text().catch(() => '');
-    throw new Error(`ElevenLabs voices ${resp.status}: ${detail.slice(0, 200)}`);
+    throw new Error(elError('voices', resp.status, detail));
   }
   const data = await resp.json();
   return (data.voices || []).map((v) => {
