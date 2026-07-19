@@ -7,3 +7,4 @@ node_modules/
 hooks-snippet.json
 assets/readback.ico
 assets/voicebox.ico
+.claude/launch.json
