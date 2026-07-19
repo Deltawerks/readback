@@ -45,26 +45,55 @@ npm run panel        # opens the control panel in your browser
 ```
 
 In the panel: pick a **provider**, paste that provider's **API key**, choose a
-**voice**. Then wire it into Claude Code:
+**voice**, and hit ▶ to hear it. Then wire it into Claude Code:
 
 ```powershell
 npm run register     # writes .mcp.json + hooks-snippet.json for this folder
 ```
 
-- **MCP server:** auto-loads when you work in this folder, or add it globally with
-  the `claude mcp add …` line `register` prints.
-- **Auto-speak hook:** merge the generated `hooks-snippet.json` into your Claude
-  Code `settings.json` (`~/.claude/settings.json` for every project), then restart
-  Claude Code.
-- **Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
-  launches the panel with one click.
+**1 — MCP server** (the in-chat toggle). Auto-loads whenever you work in this
+folder. To get it in *every* project, run the `claude mcp add …` line that
+`register` prints.
 
-Quick smoke test without Claude Code:
+**2 — Auto-speak hook** (the part that actually talks). Open your Claude Code
+settings at `C:\Users\<you>\.claude\settings.json` and add the `hooks` block from
+the `hooks-snippet.json` that `register` just wrote. If that settings file
+doesn't exist yet, paste the snippet in as the whole file. If it does exist, add
+`"hooks"` alongside whatever is already in there:
+
+```json
+{
+  "yourExistingSettings": "stay exactly as they are",
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "node", "args": ["C:\\path\\to\\readback\\hook\\stop-hook.js"], "timeout": 15 } ] }
+    ]
+  }
+}
+```
+
+Use the path from *your* generated snippet, not the one above. Then **restart
+Claude Code**, say "voice on", and the next reply should speak.
+
+**Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
+opens the panel in one click.
+
+Quick smoke test, no Claude Code required:
 
 ```powershell
 npm run say "readback is online"
 npm run voices        # list the active provider's voices
 ```
+
+### Day to day (and after a reboot)
+
+**Nothing to restart.** Claude Code launches the MCP server itself, and the hook
+is just a line in its settings file — both come back on their own after a reboot.
+
+The control panel is **optional and on-demand**: a settings GUI, not a background
+service. Voice keeps working whether or not it's open, because the hook reads
+your saved settings from disk. Launch it (Desktop icon or `npm run panel`) when
+you want to switch voice, provider or speed — then close it again.
 
 ## Using it
 
