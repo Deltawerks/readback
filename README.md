@@ -1,8 +1,9 @@
 # Readback
 
 **Voice output for Claude Code.** Flip it on and Claude reads its replies aloud —
-so you can close your eyes and *listen* instead of staring at the terminal for
-hours. Flip it off (mid-sentence if you need to) and it's silent again.
+rest your eyes, or keep half an ear on a long run instead of watching the
+terminal scroll. Flip it off and it stops immediately, mid-sentence if the phone
+rings.
 
 <p align="center">
   <img src="img/readback.png" alt="Readback control panel" width="420" />
