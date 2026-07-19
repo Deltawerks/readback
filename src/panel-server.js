@@ -3,7 +3,6 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { ROOT, PORT, setApiKey, hasApiKey, keyHint } from './config.js';
 import { readState, writeState, updateProviderConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
@@ -12,7 +11,6 @@ import { speak } from './speak.js';
 import { providerMeta, PROVIDER_IDS } from './providers/index.js';
 import { log } from './log.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX = path.join(ROOT, 'panel', 'index.html');
 // Bundled so the panel renders with no outbound requests.
 const LOGO = path.join(ROOT, 'panel', 'logo.png');
@@ -42,20 +40,32 @@ function stateResponse(st) {
 
 function send(res, status, body, type = 'application/json') {
   const payload = type === 'application/json' ? JSON.stringify(body) : body;
-  res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  res.writeHead(status, {
+    'Content-Type': type,
+    'Cache-Control': 'no-store',
+    // Nothing here should ever be framed: an overlay could otherwise induce
+    // clicks on the panel's own controls, which the origin check would allow.
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "frame-ancestors 'none'",
+  });
   res.end(payload);
 }
 
 // The panel is loopback-only, but a page you visit in the same browser could
 // still POST to it (classic CSRF), or point its own hostname at 127.0.0.1
-// (DNS rebinding). Requiring a loopback Host and — when the browser sends one —
-// a same-origin Origin closes both without needing a token. A missing Origin is
-// fine: that's curl/the health probe, not a cross-site page.
+// (DNS rebinding). Requiring a loopback Host and a same-origin-looking request
+// closes both without needing a token.
 const LOOPBACK_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`]);
 const SELF_ORIGINS = new Set([...LOOPBACK_HOSTS].map((h) => `http://${h}`));
 
 function isSameOriginLocal(req) {
   if (!LOOPBACK_HOSTS.has(req.headers.host)) return false;
+  // Origin alone isn't enough: browsers omit it on no-cors GETs (<img>, <script>,
+  // fetch with mode:'no-cors'), which would otherwise let a hostile page hit
+  // /api/voices and burn the user's provider quota. Sec-Fetch-Site is sent on
+  // those too. Absent entirely means a non-browser client (curl, health probe).
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
   return !origin || SELF_ORIGINS.has(origin);
 }
@@ -78,12 +88,39 @@ function readBody(req) {
   });
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
-  const { pathname } = url;
-
+// Serve a bundled asset, or 404 if it's missing. Never let the fs error reach
+// the client — its message carries the absolute install path.
+async function sendAsset(res, file, type) {
+  let buf;
   try {
-    if (pathname.startsWith('/api/') && !isSameOriginLocal(req)) {
+    buf = await readFile(file);
+  } catch {
+    return send(res, 404, { error: 'not found' });
+  }
+  res.writeHead(200, {
+    'Content-Type': type,
+    'Cache-Control': 'no-store',
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "frame-ancestors 'none'",
+  });
+  res.end(buf);
+}
+
+const server = http.createServer(async (req, res) => {
+  try {
+    let url;
+    try {
+      url = new URL(req.url, `http://localhost:${PORT}`);
+    } catch {
+      // A malformed target ("//[" parses as an invalid IPv6 host) must not be
+      // allowed to throw out of this async handler and kill the process.
+      return send(res, 400, { error: 'bad request' });
+    }
+    const { pathname } = url;
+
+    // Applies to every route, not just /api/: the static routes would otherwise
+    // still answer a rebound host, and their errors reveal the install path.
+    if (!isSameOriginLocal(req)) {
       return send(res, 403, { error: 'forbidden' });
     }
 
@@ -94,19 +131,13 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, html, 'text/html; charset=utf-8');
     }
 
-    if (pathname === '/logo.png') {
-      const png = await readFile(LOGO);
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
-      return res.end(png);
-    }
+    if (pathname === '/logo.png') return sendAsset(res, LOGO, 'image/png');
 
     if (pathname.startsWith('/fonts/')) {
       // basename + whitelist: the URL can never escape panel/fonts/.
       const name = path.basename(pathname);
       if (!/^[\w-]+\.woff2$/.test(name)) return send(res, 404, { error: 'not found' });
-      const font = await readFile(path.join(FONT_DIR, name));
-      res.writeHead(200, { 'Content-Type': 'font/woff2', 'Cache-Control': 'no-store' });
-      return res.end(font);
+      return sendAsset(res, path.join(FONT_DIR, name), 'font/woff2');
     }
 
     if (pathname === '/api/state' && req.method === 'GET') {
@@ -165,6 +196,11 @@ const server = http.createServer(async (req, res) => {
     log('panel error', err && err.message);
     return send(res, 500, { error: err && err.message });
   }
+});
+
+// Malformed HTTP that never reaches the handler must not take the panel down.
+server.on('clientError', (err, socket) => {
+  if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
 });
 
 function openBrowser(url) {

@@ -7,7 +7,7 @@ import {
   mkdirSync,
 } from 'node:fs';
 import path from 'node:path';
-import { STATE_DIR, STREAM_SCRIPT } from './config.js';
+import { CACHE_DIR, STREAM_SCRIPT } from './config.js';
 import { readState, writeState, ensureStateDir } from './state.js';
 
 // Kill whatever is currently playing (the streaming player, tracked by PID).
@@ -32,10 +32,10 @@ export function stopPlayback() {
 function cleanOldStreams(keepDir) {
   try {
     const keep = keepDir ? path.basename(keepDir) : null;
-    for (const f of readdirSync(STATE_DIR)) {
+    for (const f of readdirSync(CACHE_DIR)) {
       if (/^stream-\d+$/.test(f) && f !== keep) {
         try {
-          rmSync(path.join(STATE_DIR, f), { recursive: true, force: true });
+          rmSync(path.join(CACHE_DIR, f), { recursive: true, force: true });
         } catch {
           // a dying player may still hold a clip — cleaned next time
         }
@@ -49,7 +49,7 @@ function cleanOldStreams(keepDir) {
 // Fresh per-utterance directory for streamed chunks; stale ones are removed.
 export function newStreamDir() {
   ensureStateDir();
-  const dir = path.join(STATE_DIR, `stream-${Date.now()}`);
+  const dir = path.join(CACHE_DIR, `stream-${Date.now()}`);
   mkdirSync(dir, { recursive: true });
   cleanOldStreams(dir);
   return dir;

@@ -68,8 +68,21 @@ export const LEGACY_STATE_DIRS = [
   path.join(ROOT, '.readback'),
   path.join(ROOT, '.voicebox'),
 ];
+
+// Throwaway data — the log and multi-MB WAV chunks — goes in a local (never
+// roamed) dir, so it can't bloat a synced Windows profile. Follows STATE_DIR
+// when that's been overridden, to keep everything together for tests.
+function defaultCacheDir() {
+  if (process.env.READBACK_STATE_DIR) return STATE_DIR;
+  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
+    return path.join(process.env.LOCALAPPDATA, 'Readback');
+  }
+  return STATE_DIR;
+}
+
+export const CACHE_DIR = defaultCacheDir();
 export const STATE_FILE = path.join(STATE_DIR, 'state.json');
-export const LOG_FILE = path.join(STATE_DIR, 'readback.log');
+export const LOG_FILE = path.join(CACHE_DIR, 'readback.log');
 export const SECRET_FILE = path.join(STATE_DIR, 'secret.json');
 export const STREAM_SCRIPT = path.join(ROOT, 'scripts', 'play-stream.ps1');
 

@@ -7,12 +7,17 @@ import {
   existsSync,
 } from 'node:fs';
 import path from 'node:path';
-import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, DEFAULTS } from './config.js';
+import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, SECRET_FILE, DEFAULTS } from './config.js';
 import { PROVIDER_IDS } from './providers/index.js';
 
 export function ensureStateDir() {
-  if (existsSync(STATE_DIR)) return;
-  mkdirSync(STATE_DIR, { recursive: true });
+  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
+  // Gate the migration on the payload files, NOT on the directory: log() and
+  // setApiKey() also mkdir STATE_DIR, and both entry points log before they
+  // ever read state. Keying off the directory meant a stray readback.log
+  // created on first launch permanently suppressed the copy — silently losing
+  // an upgrading user's saved key.
+  if (existsSync(STATE_FILE) || existsSync(SECRET_FILE)) return;
   // One-time migration: copy a saved key + settings from an older in-repo dir
   // (originals left intact). Skipped when a custom state dir is set (tests).
   if (process.env.READBACK_STATE_DIR) return;

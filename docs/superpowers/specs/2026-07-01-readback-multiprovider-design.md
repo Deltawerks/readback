@@ -1,8 +1,13 @@
 # Readback — multi-provider + public release design
 
 Date: 2026-07-01
-Status: approved, implementing
+Status: **shipped** — kept as a historical design record, not current documentation.
 Supersedes naming/scope of the original `voicebox` spec (2026-06-30).
+
+> Some details here were overtaken by the implementation. Most notably, state and
+> secrets now live in a per-user app-data directory rather than the in-repo
+> `.readback/` this document describes. **The [README](../../../README.md) is the
+> authoritative description of how Readback actually behaves.**
 
 ## Goal
 

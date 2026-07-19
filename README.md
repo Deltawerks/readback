@@ -79,6 +79,11 @@ cloud-synced folder can't sync your key with it. Override the location with
 links flattened, markdown/emoji stripped) and long replies are truncated with a
 spoken "…the rest is on screen."
 
+> **Upgrading from an earlier version?** Your key and settings are copied to the
+> new location automatically on first run. The originals are left in the repo's
+> `.readback/` folder (gitignored) so nothing is lost if you roll back — delete
+> that folder once you've confirmed things still work.
+
 ## Notes & limits
 
 - Windows only (PowerShell `SoundPlayer` playback). No STT / voice input.
@@ -86,8 +91,14 @@ spoken "…the rest is on screen."
   PCM wrapped in a WAV header), so the streaming player never cares which
   provider you're on.
 - The panel is loopback-only (`127.0.0.1`), rejects cross-origin requests, and
-  bundles its own logo + fonts — it makes no outbound calls of its own.
-- Trouble? Check `readback.log` in the state folder above.
+  bundles its own logo + fonts, so the page itself loads nothing from the
+  internet.
+- Synthesis *does* call out, by design: your cleaned, truncated reply text and
+  your API key go to whichever provider you picked (Inworld or ElevenLabs) over
+  HTTPS, and nowhere else. Readback has no servers, no telemetry, no analytics,
+  and no update check.
+- Trouble? Check `readback.log` — `%LOCALAPPDATA%\Readback` on Windows (throwaway
+  data is kept out of the roaming profile), alongside the state dir otherwise.
 
 ## License
 
