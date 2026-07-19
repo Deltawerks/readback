@@ -68,9 +68,12 @@ npm run voices        # list the active provider's voices
 - In the panel: switch provider, pick a voice, drag speed / expression, hit ▶ to
   preview. Changes apply to the next spoken reply.
 
-Keys live in `.readback/secret.json` (gitignored, per-machine). Replies are
-cleaned before speaking (code blocks dropped, links flattened, markdown/emoji
-stripped) and long replies are truncated with a spoken "…the rest is on screen."
+Keys are stored per-user **outside the repo** — `%APPDATA%\Readback\secret.json`
+on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
+cloud-synced folder can't sync your key with it. Override the location with
+`READBACK_STATE_DIR`. Replies are cleaned before speaking (code blocks dropped,
+links flattened, markdown/emoji stripped) and long replies are truncated with a
+spoken "…the rest is on screen."
 
 ## Notes & limits
 
@@ -78,7 +81,9 @@ stripped) and long replies are truncated with a spoken "…the rest is on screen
 - Speech is provider-agnostic WAV under the hood (Inworld LINEAR16; ElevenLabs
   PCM wrapped in a WAV header), so the streaming player never cares which
   provider you're on.
-- Trouble? Check `.readback/readback.log`.
+- The panel is loopback-only (`127.0.0.1`), rejects cross-origin requests, and
+  bundles its own logo + fonts — it makes no outbound calls of its own.
+- Trouble? Check `readback.log` in the state folder above.
 
 ## License
 

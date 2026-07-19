@@ -47,12 +47,27 @@ function num(value, def) {
   return Number.isFinite(n) ? n : def;
 }
 
-// State lives in .readback/ at the project root (override for tests via env).
+// State + secrets live in a per-user app-data dir, deliberately NOT inside the
+// repo: cloning into a cloud-synced or shared folder would otherwise sync your
+// API key along with it. Override with READBACK_STATE_DIR (tests use this).
+function defaultStateDir() {
+  if (process.platform === 'win32' && process.env.APPDATA) {
+    return path.join(process.env.APPDATA, 'Readback');
+  }
+  const base =
+    process.env.XDG_CONFIG_HOME ||
+    (process.env.HOME ? path.join(process.env.HOME, '.config') : '');
+  return base ? path.join(base, 'readback') : path.join(ROOT, '.readback');
+}
+
 export const STATE_DIR = process.env.READBACK_STATE_DIR
   ? path.resolve(process.env.READBACK_STATE_DIR)
-  : path.join(ROOT, '.readback');
-// Legacy dir from the pre-rename "voicebox" days — migrated on first run.
-export const LEGACY_STATE_DIR = path.join(ROOT, '.voicebox');
+  : defaultStateDir();
+// Older in-repo locations, copied over on first run (originals left intact).
+export const LEGACY_STATE_DIRS = [
+  path.join(ROOT, '.readback'),
+  path.join(ROOT, '.voicebox'),
+];
 export const STATE_FILE = path.join(STATE_DIR, 'state.json');
 export const LOG_FILE = path.join(STATE_DIR, 'readback.log');
 export const SECRET_FILE = path.join(STATE_DIR, 'secret.json');

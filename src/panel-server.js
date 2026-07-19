@@ -14,6 +14,9 @@ import { log } from './log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const INDEX = path.join(ROOT, 'panel', 'index.html');
+// Bundled so the panel renders with no outbound requests.
+const LOGO = path.join(ROOT, 'panel', 'logo.png');
+const FONT_DIR = path.join(ROOT, 'panel', 'fonts');
 
 // Config fields the panel may write into the active provider's block.
 const CONFIG_FIELDS = ['voiceId', 'modelId', 'speed', 'temperature', 'stability', 'similarity', 'style', 'speakerBoost'];
@@ -43,6 +46,20 @@ function send(res, status, body, type = 'application/json') {
   res.end(payload);
 }
 
+// The panel is loopback-only, but a page you visit in the same browser could
+// still POST to it (classic CSRF), or point its own hostname at 127.0.0.1
+// (DNS rebinding). Requiring a loopback Host and — when the browser sends one —
+// a same-origin Origin closes both without needing a token. A missing Origin is
+// fine: that's curl/the health probe, not a cross-site page.
+const LOOPBACK_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`]);
+const SELF_ORIGINS = new Set([...LOOPBACK_HOSTS].map((h) => `http://${h}`));
+
+function isSameOriginLocal(req) {
+  if (!LOOPBACK_HOSTS.has(req.headers.host)) return false;
+  const origin = req.headers.origin;
+  return !origin || SELF_ORIGINS.has(origin);
+}
+
 function readBody(req) {
   return new Promise((resolve) => {
     let data = '';
@@ -66,11 +83,30 @@ const server = http.createServer(async (req, res) => {
   const { pathname } = url;
 
   try {
+    if (pathname.startsWith('/api/') && !isSameOriginLocal(req)) {
+      return send(res, 403, { error: 'forbidden' });
+    }
+
     if (pathname === '/health') return send(res, 200, { ok: true });
 
     if (pathname === '/' || pathname === '/index.html') {
       const html = await readFile(INDEX, 'utf8');
       return send(res, 200, html, 'text/html; charset=utf-8');
+    }
+
+    if (pathname === '/logo.png') {
+      const png = await readFile(LOGO);
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+      return res.end(png);
+    }
+
+    if (pathname.startsWith('/fonts/')) {
+      // basename + whitelist: the URL can never escape panel/fonts/.
+      const name = path.basename(pathname);
+      if (!/^[\w-]+\.woff2$/.test(name)) return send(res, 404, { error: 'not found' });
+      const font = await readFile(path.join(FONT_DIR, name));
+      res.writeHead(200, { 'Content-Type': 'font/woff2', 'Cache-Control': 'no-store' });
+      return res.end(font);
     }
 
     if (pathname === '/api/state' && req.method === 'GET') {

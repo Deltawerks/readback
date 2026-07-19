@@ -4,10 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Readback</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
 <style>
+  /* Fonts are bundled (latin subset, variable) so the panel loads with zero
+     outbound requests and renders identically offline. See fonts/README.md. */
+  @font-face {
+    font-family: "Orbitron"; font-style: normal; font-weight: 400 900;
+    font-display: swap; src: url("fonts/orbitron-latin.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "Roboto"; font-style: normal; font-weight: 100 900;
+    font-stretch: 100%; font-display: swap;
+    src: url("fonts/roboto-latin.woff2") format("woff2");
+  }
   :root {
     --txt: #eaf1fb; --muted: #c4d5ec; --dim: #9ab2d2;
     --blue: #3378f6; --blue-2: #60a5fa; --cyan: #22d3ee; --cyan-2: #67e8f9;
@@ -69,7 +77,7 @@
   .seg button:hover { border-color: var(--cyan); color: var(--muted); }
   .seg button.active { border-color: var(--blue); color: var(--txt); background: rgba(51,120,246,.16); box-shadow: 0 0 12px rgba(51,120,246,.3); }
   .row { display: flex; gap: 8px; align-items: center; }
-  .row.mb { margin-bottom: 18px; }
+  .mb { margin-bottom: 18px; }
   button.icon, button.btn { height: 42px; border-radius: 6px; border: 1px solid var(--line); background: #04070e; color: var(--cyan-2); cursor: pointer; font-family: var(--hud); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; display: inline-flex; align-items: center; justify-content: center; gap: 7px; transition: all .15s; }
   button.icon { width: 46px; flex: none; }
   button.btn { padding: 0 16px; }
@@ -105,7 +113,7 @@
   <div class="card">
     <div class="head">
       <div class="brand">
-        <img class="logo-img" src="https://storage.googleapis.com/deltawerks-data/DWLogo_cyan_s.png" alt="Readback" />
+        <img class="logo-img" src="logo.png" alt="Readback" />
         <div>
           <div class="title"><span class="r">Read</span><span class="b">Back</span></div>
           <div class="subtitle">Claude Code voice</div>

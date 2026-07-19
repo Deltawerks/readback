@@ -7,23 +7,30 @@ import {
   existsSync,
 } from 'node:fs';
 import path from 'node:path';
-import { STATE_DIR, LEGACY_STATE_DIR, STATE_FILE, DEFAULTS } from './config.js';
+import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, DEFAULTS } from './config.js';
 import { PROVIDER_IDS } from './providers/index.js';
 
 export function ensureStateDir() {
   if (existsSync(STATE_DIR)) return;
   mkdirSync(STATE_DIR, { recursive: true });
-  // One-time migration: copy a saved key + settings from the old .voicebox dir
-  // (leaving it intact). Skipped when a custom state dir is set (tests).
-  if (!process.env.READBACK_STATE_DIR && existsSync(LEGACY_STATE_DIR)) {
+  // One-time migration: copy a saved key + settings from an older in-repo dir
+  // (originals left intact). Skipped when a custom state dir is set (tests).
+  if (process.env.READBACK_STATE_DIR) return;
+  for (const dir of LEGACY_STATE_DIRS) {
+    if (!existsSync(dir)) continue;
+    let migrated = false;
     for (const f of ['state.json', 'secret.json']) {
       try {
-        const src = path.join(LEGACY_STATE_DIR, f);
-        if (existsSync(src)) copyFileSync(src, path.join(STATE_DIR, f));
+        const src = path.join(dir, f);
+        if (existsSync(src)) {
+          copyFileSync(src, path.join(STATE_DIR, f));
+          migrated = true;
+        }
       } catch {
         // best effort — the panel can re-enter the key
       }
     }
+    if (migrated) return; // newest legacy dir wins; don't let older ones clobber it
   }
 }
 
