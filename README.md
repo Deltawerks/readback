@@ -4,6 +4,10 @@
 so you can close your eyes and *listen* instead of staring at the terminal for
 hours. Flip it off (mid-sentence if you need to) and it's silent again.
 
+<p align="center">
+  <img src="img/readback.png" alt="Readback control panel" width="420" />
+</p>
+
 - 🪟 **Windows-first** — plays through built-in PowerShell audio, zero external
   dependencies. (Most Claude voice tools are macOS-only.)
 - 🎚️ **Two providers** — [Inworld](https://inworld.ai) (hundreds of voices, cheap)
