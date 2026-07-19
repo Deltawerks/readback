@@ -60,6 +60,16 @@ const SELF_ORIGINS = new Set([...LOOPBACK_HOSTS].map((h) => `http://${h}`));
 
 function isSameOriginLocal(req) {
   if (!LOOPBACK_HOSTS.has(req.headers.host)) return false;
+
+  // Opening the panel from a bookmark or a link on another site is a *cross-site
+  // navigation*, and that's legitimate: the user lands on the panel's own origin,
+  // and the referring page can't read a navigation's response. Restricted to safe
+  // methods, so a cross-site form POST is still treated as CSRF.
+  const method = (req.method || 'GET').toUpperCase();
+  if (req.headers['sec-fetch-mode'] === 'navigate' && (method === 'GET' || method === 'HEAD')) {
+    return true;
+  }
+
   // Origin alone isn't enough: browsers omit it on no-cors GETs (<img>, <script>,
   // fetch with mode:'no-cors'), which would otherwise let a hostile page hit
   // /api/voices and burn the user's provider quota. Sec-Fetch-Site is sent on
