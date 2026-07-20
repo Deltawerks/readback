@@ -1,4 +1,4 @@
-' Readback panel launcher — no console window.
+' Readback panel launcher. No console window.
 ' If the panel server is already running, open the browser to it.
 ' Otherwise start the server hidden (it opens the browser itself once ready).
 
@@ -24,7 +24,7 @@ End If
 On Error GoTo 0
 
 If running Then
-  ' Already up — just show it.
+  ' Already up, just show it.
   shell.Run baseUrl, 1, False
 Else
   ' Start the server hidden; panel-server.js opens the browser when ready.

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Smoke test: `npm run say "hello there"` — synthesize and play one line
+// Smoke test: `npm run say "hello there"` synthesizes and plays one line
 // through the active provider.
 import { readState, activeConfig } from '../src/state.js';
 import { stripForSpeech } from '../src/tts.js';
@@ -15,7 +15,7 @@ console.log(`Synthesizing: "${clean}"`);
 
 try {
   console.log('Playing…');
-  // wait:true — keep this process alive until playback finishes.
+  // wait:true keeps this process alive until playback finishes.
   await speak(clean, st, { wait: true });
   console.log('Done.');
 } catch (err) {

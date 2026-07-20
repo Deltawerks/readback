@@ -100,7 +100,7 @@ function readBody(req) {
 }
 
 // Serve a bundled asset, or 404 if it's missing. Never let the fs error reach
-// the client — its message carries the absolute install path.
+// the client, whose message carries the absolute install path.
 async function sendAsset(res, file, type) {
   let buf;
   try {
@@ -191,7 +191,7 @@ const server = http.createServer(async (req, res) => {
       const st = readState();
       const clean = truncateForSpeech(stripForSpeech(text || ''), st.maxChars);
       if (!clean) return send(res, 200, { ok: false, reason: 'nothing speakable' });
-      // wait:false — awaits the first chunk (so errors surface here), then
+      // wait:false awaits the first chunk (so errors surface here), then
       // streams the rest in the background.
       await speak(clean, st, { wait: false });
       return send(res, 200, { ok: true });
@@ -223,7 +223,7 @@ function openBrowser(url) {
       detached: true,
     }).unref();
   } catch {
-    // ignore — user can open the URL manually
+    // ignore; user can open the URL manually
   }
 }
 
@@ -252,7 +252,7 @@ server.on('error', async (err) => {
       setTimeout(() => server.listen(PORT, '127.0.0.1'), 1000);
       return;
     }
-    log(`panel: port ${PORT} busy and unresponsive — set READBACK_PORT or free it`);
+    log(`panel: port ${PORT} busy and unresponsive; set READBACK_PORT or free it`);
     process.exit(1);
   }
   log('panel listen error', err.message);

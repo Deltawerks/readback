@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Claude Code Stop hook. Reads the hook payload from stdin, and if voice is
-// enabled, spawns a detached worker to speak the last reply — then exits
+// enabled, spawns a detached worker to speak the last reply, then exits
 // immediately so the turn is never blocked or slowed by TTS.
 import { spawn } from 'node:child_process';
 import path from 'node:path';

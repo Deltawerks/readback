@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Detached worker: read the current turn's assistant reply from the transcript,
 // clean it up for speech, synthesize with the active provider, and stream it.
-// All failures are logged and swallowed — this must never crash or surface an error.
+// All failures are logged and swallowed. This must never crash or surface an error.
 import { readFileSync } from 'node:fs';
 import { readState, writeState, activeConfig } from '../src/state.js';
 import { currentReply } from '../src/transcript.js';
@@ -68,9 +68,9 @@ async function main() {
     return;
   }
 
-  // wait:true  — stay alive until playback finishes, or the player (a non-detached
+  // wait:true  keeps this alive until playback finishes, or the player (a non-detached
   //   child) would be torn down when the worker exits.
-  // queue:true — line up behind other sessions instead of cutting them off.
+  // queue:true lines up behind other sessions instead of cutting them off.
   await speak(clean, st, { wait: true, queue: true });
   log(`worker: spoke ${clean.length} chars via ${st.provider}/${activeConfig(st).voiceId}`);
 }

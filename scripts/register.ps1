@@ -19,7 +19,7 @@ $mcpJson = @"
   }
 }
 "@
-# UTF-8 without BOM — a BOM makes the JSON invalid for strict parsers.
+# UTF-8 without BOM. A BOM makes the JSON invalid for strict parsers.
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText((Join-Path $root ".mcp.json"), $mcpJson, $utf8NoBom)
 

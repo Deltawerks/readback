@@ -8,7 +8,7 @@ export function getProvider(name) {
   return PROVIDERS[name] || inworld;
 }
 
-// Serializable metadata for the panel (labels, models, tuning knobs) — no functions.
+// Serializable metadata for the panel (labels, models, tuning knobs). No functions.
 export function providerMeta() {
   return Object.fromEntries(
     Object.entries(PROVIDERS).map(([id, p]) => [

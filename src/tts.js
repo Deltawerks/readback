@@ -25,7 +25,7 @@ export function stripForSpeech(md) {
   t = t.replace(/^\s*\|?[-:\s|]+\|?\s*$/gm, ' ');  // table separator rows
   t = t.replace(/\|/g, ' ');                       // table cell pipes
   // Strip emoji / pictographs / arrows / variation selectors, preserving smart
-  // quotes (‘-”), en/em dashes (–-—) and the ellipsis (…).
+  // quotes, en and em dashes, and the ellipsis.
   t = t.replace(
     /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FE0F}\u{2000}-\u{200F}]/gu,
     ''

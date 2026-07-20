@@ -45,7 +45,7 @@ server.registerTool(
   },
   async () => {
     stopPlayback();
-    flushQueue(); // clear any queued sessions too — "silence right now"
+    flushQueue(); // clear any queued sessions too ("silence right now")
     return text(`🔇 ${summarize(writeState({ enabled: false }))}`);
   }
 );
@@ -166,7 +166,7 @@ server.registerTool(
       const voices = await listVoices(readState(), filter ? { filter } : undefined);
       if (!voices.length) return text('no voices returned');
       const lines = voices.map(
-        (v) => `${v.voiceId} — ${v.description || v.displayName}${v.gender ? ` (${v.gender})` : ''}`
+        (v) => `${v.voiceId}: ${v.description || v.displayName}${v.gender ? ` (${v.gender})` : ''}`
       );
       return text(lines.join('\n'));
     } catch (err) {

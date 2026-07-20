@@ -15,7 +15,7 @@ export function ensureStateDir() {
   // Gate the migration on the payload files, NOT on the directory: log() and
   // setApiKey() also mkdir STATE_DIR, and both entry points log before they
   // ever read state. Keying off the directory meant a stray readback.log
-  // created on first launch permanently suppressed the copy — silently losing
+  // created on first launch permanently suppressed the copy, silently losing
   // an upgrading user's saved key.
   if (existsSync(STATE_FILE) || existsSync(SECRET_FILE)) return;
   // One-time migration: copy a saved key + settings from an older in-repo dir
@@ -32,7 +32,7 @@ export function ensureStateDir() {
           migrated = true;
         }
       } catch {
-        // best effort — the panel can re-enter the key
+        // best effort; the panel can re-enter the key
       }
     }
     if (migrated) return; // newest legacy dir wins; don't let older ones clobber it
@@ -88,7 +88,7 @@ export function readState() {
   try {
     writeAtomic({ ...initial, updatedAt: new Date().toISOString() });
   } catch {
-    // best effort — reads still work from the returned object
+    // best effort; reads still work from the returned object
   }
   return initial;
 }

@@ -69,7 +69,7 @@ export const LEGACY_STATE_DIRS = [
   path.join(ROOT, '.voicebox'),
 ];
 
-// Throwaway data — the log and multi-MB WAV chunks — goes in a local (never
+// Throwaway data (the log and multi-MB WAV chunks) goes in a local (never
 // roamed) dir, so it can't bloat a synced Windows profile. Follows STATE_DIR
 // when that's been overridden, to keep everything together for tests.
 function defaultCacheDir() {
@@ -132,7 +132,7 @@ export function hasApiKey(provider = 'inworld') {
   return getApiKey(provider).length > 0;
 }
 
-// Masked display hint (last 4 chars) — never sends the full secret to the browser.
+// Masked display hint (last 4 chars). Never sends the full secret to the browser.
 export function keyHint(provider = 'inworld') {
   const k = getApiKey(provider);
   if (!k) return '';

@@ -23,7 +23,7 @@ export function stopPlayback() {
         windowsHide: true,
       });
     } catch {
-      // already gone / taskkill failed — fine
+      // already gone / taskkill failed, that's fine
     }
   }
   writeState({ lastPid: null });
@@ -37,7 +37,7 @@ function cleanOldStreams(keepDir) {
         try {
           rmSync(path.join(CACHE_DIR, f), { recursive: true, force: true });
         } catch {
-          // a dying player may still hold a clip — cleaned next time
+          // a dying player may still hold a clip, cleaned next time
         }
       }
     }
@@ -80,12 +80,12 @@ export function writeEndMarker(dir, count) {
     writeFileSync(tmp, String(count));
     renameSync(tmp, dest);
   } catch {
-    // superseded stream — the dir is gone; nothing to signal
+    // superseded stream: the dir is gone; nothing to signal
   }
 }
 
 // Spawn the single streaming player for a directory. Hidden console (NOT
-// detached — on Windows detached gives powershell.exe no console and it silently
+// detached, because on Windows detached gives powershell.exe no console and it silently
 // fails to run). Returns the child; the caller stores its PID and either
 // unref()s it (long-lived parent) or awaits its 'close' (short-lived parent).
 export function spawnStreamPlayer(dir) {

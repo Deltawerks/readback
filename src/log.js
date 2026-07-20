@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { CACHE_DIR, LOG_FILE } from './config.js';
 
-// Append-only log. Never writes to stdout — stdout is reserved for the MCP
+// Append-only log. Never writes to stdout; stdout is reserved for the MCP
 // protocol on the server, and any stray output there breaks the transport.
 export function log(...args) {
   try {

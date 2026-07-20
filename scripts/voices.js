@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `npm run voices` — print the available voices for the active provider.
+// `npm run voices` prints the available voices for the active provider.
 // Optional Inworld filter: `npm run voices -- 'source = "SYSTEM" AND lang_code = "en"'`
 import { readState } from '../src/state.js';
 import { listVoices } from '../src/tts.js';

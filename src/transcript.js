@@ -13,7 +13,7 @@ export function extractLastAssistantText(rawJsonl) {
     } catch {
       continue;
     }
-    // Skip subagent / Task-tool turns — they carry isSidechain:true but still
+    // Skip subagent / Task-tool turns; they carry isSidechain:true but still
     // have role "assistant". We only want the MAIN agent's reply spoken.
     if (obj.isSidechain === true) continue;
 
@@ -60,7 +60,7 @@ function extractText(content) {
 }
 
 // Return { text, id } for the CURRENT turn's assistant reply, but only once it
-// has actually been flushed to the transcript — i.e. the newest assistant text
+// has actually been flushed to the transcript, i.e. the newest assistant text
 // entry comes AFTER the newest user-role entry (the prompt or the last
 // tool_result). Returns null if the reply isn't written yet, which happens
 // because the Stop hook can fire before Claude Code persists the final message.

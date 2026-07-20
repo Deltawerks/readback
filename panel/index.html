@@ -256,7 +256,7 @@ function renderKey() {
   $('apiKey').value = '';
   const el = $('keyState');
   if (k.hasKey) { el.className = 'keyState ok'; el.textContent = 'key saved · ' + (k.hint || 'set'); }
-  else { el.className = 'keyState'; el.textContent = 'no ' + (m.label || '') + ' key yet — paste it above and hit Save'; }
+  else { el.className = 'keyState'; el.textContent = 'no ' + (m.label || '') + ' key yet. Paste it above and hit Save'; }
 }
 function voiceName() {
   const v = voiceList.find((x) => x.voiceId === cfg().voiceId);
@@ -277,7 +277,7 @@ function fillVoices(voices) {
   const add = (id, label) => { if (!id || have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().voiceId) o.selected = true; sel.appendChild(o); };
   for (const v of voices) {
     const name = v.displayName || v.voiceId;
-    const desc = v.description ? ' — ' + v.description : '';
+    const desc = v.description ? ' - ' + v.description : '';
     add(v.voiceId, name + desc + (v.gender ? ' (' + v.gender + ')' : ''));
   }
   if (cfg().voiceId && !have.has(cfg().voiceId)) add(cfg().voiceId, cfg().voiceId + ' (current)');

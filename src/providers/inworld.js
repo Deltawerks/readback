@@ -14,7 +14,7 @@ export const models = [
 // Tuning knobs the panel renders for this provider.
 export const knobs = [
   { key: 'speed', label: 'Speed', min: 0.5, max: 1.5, step: 0.1, suffix: 'x' },
-  { key: 'temperature', label: 'Expression', min: 0, max: 2, step: 0.1, hint: 'Voice temperature — higher is more expressive' },
+  { key: 'temperature', label: 'Expression', min: 0, max: 2, step: 0.1, hint: 'Voice temperature: higher is more expressive' },
 ];
 
 export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-1.5-max', speed: 1.3, temperature: 0.1 };

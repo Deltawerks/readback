@@ -17,20 +17,20 @@ import { log } from './log.js';
 // back-to-back with no gap. Chunks are always WAV (the streaming player uses
 // Windows SoundPlayer).
 //
-// wait:false — for long-lived parents (panel / MCP server). Awaits ONLY the
+// wait:false: for long-lived parents (panel / MCP server). Awaits ONLY the
 //   first chunk (so auth/network errors surface and audio has already started),
 //   then streams the remaining chunks in the background and returns.
-// wait:true  — for short-lived parents (hook worker, say.js). Awaits the entire
+// wait:true: for short-lived parents (hook worker, say.js). Awaits the entire
 //   utterance including playback, so the process stays alive until audio ends.
-// queue:true — automatic (hook) speech: wait our turn in the cross-process FIFO
+// queue:true: automatic (hook) speech that waits its turn in the cross-process FIFO
 //   queue so multiple sessions read in order instead of stomping each other.
-// queue:false (default) — manual speech (panel/CLI): take over immediately.
+// queue:false (default): manual speech (panel/CLI) takes over immediately.
 export async function speak(text, st, { wait = false, queue = false } = {}) {
   const chunks = chunkForSpeech(text);
   if (!chunks.length) return { spoken: 0 };
 
   // Take our place in line. (enqueue is a couple of file ops; when nothing else
-  // is talking, waitTurn returns on the first pass with no sleep — no latency.)
+  // is talking, waitTurn returns on the first pass with no sleep, so no latency.)
   const ticket = enqueue();
   if (queue) {
     // Wait politely behind any active or queued utterance. Give up if voice is
@@ -42,7 +42,7 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
       releaseTicket(ticket);
       return { spoken: 0, aborted: true };
     }
-    // Our turn — the prior utterance has finished. Do NOT stop anything.
+    // Our turn. The prior utterance has finished, so do NOT stop anything.
   } else {
     // Manual/interactive: take over now. Kill current audio and clear the queue,
     // then hold the line (our ticket) so incoming hook speech waits behind us.
@@ -56,13 +56,13 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   // before we await it.
   const closed = once(player, 'close');
   writeState({ lastPid: player.pid });
-  // Release our ticket the instant playback ends — in every mode, including
-  // wait:false where the player outlives this function — so the next in line
+  // Release our ticket the instant playback ends (in every mode, including
+  // wait:false where the player outlives this function), so the next in line
   // can start.
   const release = () => releaseTicket(ticket);
   closed.then(release, release);
 
-  // First chunk synchronously — surfaces errors and starts audio ASAP.
+  // First chunk synchronously: surfaces errors and starts audio ASAP.
   let first;
   try {
     first = await synthesize(chunks[0], st);

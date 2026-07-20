@@ -1,7 +1,7 @@
 // Cross-process FIFO queue so multiple Claude sessions speak in turn instead of
 // stomping each other. Every utterance drops a ticket file; a speaker may start
 // only when its ticket is the oldest live one AND no player is still draining.
-// All coordination is via files in CACHE_DIR — no daemon, no shared memory — so
+// All coordination is via files in CACHE_DIR (no daemon, no shared memory), so
 // it works across the independent, short-lived worker processes the Stop hook
 // spawns (one per reply, per project), which only ever see each other on disk.
 import {
@@ -48,7 +48,7 @@ export function currentEpoch() {
   }
 }
 
-// Tell every waiter to abandon its wait — the user asked for silence, or a
+// Tell every waiter to abandon its wait: the user asked for silence, or a
 // manual utterance is jumping the line. Strictly monotonic, so even two flushes
 // in the same millisecond still register as a change to a waiter.
 export function flushQueue() {
@@ -57,7 +57,7 @@ export function flushQueue() {
     const prev = Number(currentEpoch()) || 0;
     writeFileSync(EPOCH_FILE, String(Math.max(Date.now(), prev + 1)));
   } catch {
-    // best effort — a stale epoch just means a waiter starts instead of aborting
+    // best effort. A stale epoch just means a waiter starts instead of aborting
   }
 }
 
@@ -101,7 +101,7 @@ export function cleanStale() {
     try {
       pid = JSON.parse(readFileSync(p, 'utf8')).pid;
     } catch {
-      // unreadable / torn write — treat as dead and remove
+      // unreadable / torn write; treat as dead and remove
     }
     if (!pidAlive(pid)) {
       try {
@@ -115,7 +115,7 @@ export function cleanStale() {
 
 // Is this ticket the oldest live one in the queue? Fails OPEN: if our ticket
 // vanished (write failed, or a stale-sweep removed it) we return true rather
-// than wait forever — a reply must never go unspoken over queue bookkeeping.
+// than wait forever. A reply must never go unspoken over queue bookkeeping.
 export function isFront(ticket) {
   let files;
   try {
