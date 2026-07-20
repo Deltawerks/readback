@@ -5,11 +5,12 @@ import { z } from 'zod';
 import { readState, writeState, updateProviderConfig, activeConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
+import { flushQueue } from './queue.js';
 import { speak } from './speak.js';
 import { PROVIDER_IDS } from './providers/index.js';
 import { log } from './log.js';
 
-const server = new McpServer({ name: 'readback', version: '0.2.0' });
+const server = new McpServer({ name: 'readback', version: '0.3.0' });
 
 function summarize(st) {
   const c = activeConfig(st);
@@ -44,6 +45,7 @@ server.registerTool(
   },
   async () => {
     stopPlayback();
+    flushQueue(); // clear any queued sessions too — "silence right now"
     return text(`🔇 ${summarize(writeState({ enabled: false }))}`);
   }
 );
@@ -68,7 +70,8 @@ server.registerTool(
   },
   async () => {
     stopPlayback();
-    return text('⏹ stopped current playback (voice stays armed)');
+    flushQueue(); // clear the queue as well, so "stop" means stop everything
+    return text('⏹ stopped playback and cleared the queue (voice stays armed)');
   }
 );
 

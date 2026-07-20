@@ -7,6 +7,7 @@ import { ROOT, PORT, setApiKey, hasApiKey, keyHint } from './config.js';
 import { readState, writeState, updateProviderConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
+import { flushQueue } from './queue.js';
 import { speak } from './speak.js';
 import { providerMeta, PROVIDER_IDS } from './providers/index.js';
 import { log } from './log.js';
@@ -156,7 +157,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/state' && req.method === 'POST') {
       const body = await readBody(req);
-      if (body.enabled === false) stopPlayback();
+      if (body.enabled === false) { stopPlayback(); flushQueue(); }
       const top = {};
       if (body.enabled !== undefined) top.enabled = body.enabled;
       if (body.provider !== undefined && PROVIDER_IDS.includes(body.provider)) top.provider = body.provider;
@@ -198,6 +199,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/stop' && req.method === 'POST') {
       stopPlayback();
+      flushQueue();
       return send(res, 200, { ok: true });
     }
 

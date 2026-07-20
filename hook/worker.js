@@ -49,8 +49,18 @@ async function main() {
     return;
   }
 
-  // Mark spoken up front so a duplicate hook fire won't repeat this reply.
-  writeState({ lastSpokenId: reply.id });
+  // Claim this reply. A duplicate hook fire now QUEUES rather than stomping, so
+  // without a claim the same reply could be spoken twice back-to-back. Both
+  // racing workers write their pid; whichever lands last wins, and the other
+  // backs off after a short settle. (60ms is imperceptible and the worker is
+  // detached, so Claude Code is unaffected either way.)
+  writeState({ lastSpokenId: reply.id, lastSpokenBy: process.pid });
+  await sleep(60);
+  const claim = readState();
+  if (claim.lastSpokenId !== reply.id || claim.lastSpokenBy !== process.pid) {
+    log('worker: reply already claimed by another worker, backing off');
+    return;
+  }
 
   const clean = truncateForSpeech(stripForSpeech(reply.text), st.maxChars);
   if (!clean || clean.length < 2) {
@@ -58,9 +68,10 @@ async function main() {
     return;
   }
 
-  // wait:true — stay alive until playback finishes, or the player (a non-detached
-  // child) would be torn down when the worker exits. speak() streams chunks.
-  await speak(clean, st, { wait: true });
+  // wait:true  — stay alive until playback finishes, or the player (a non-detached
+  //   child) would be torn down when the worker exits.
+  // queue:true — line up behind other sessions instead of cutting them off.
+  await speak(clean, st, { wait: true, queue: true });
   log(`worker: spoke ${clean.length} chars via ${st.provider}/${activeConfig(st).voiceId}`);
 }
 

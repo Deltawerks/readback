@@ -1,6 +1,6 @@
 {
   "name": "readback",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Windows-first, dual-provider (Inworld + ElevenLabs) voice output for Claude Code — reads Claude's replies aloud, tuned from a GUI panel.",
   "license": "MIT",

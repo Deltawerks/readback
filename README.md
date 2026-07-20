@@ -17,6 +17,9 @@ rings.
   expression, with a live voice picker and in-app key entry. No `.env` fiddling.
 - ⚡ **Streaming** — splits replies into sentences and starts talking on the
   first one, so audio kicks in fast even on long messages.
+- 🔀 **Multi-session** — running several Claude projects at once? Their replies
+  **queue and read in order** instead of cutting each other off. Voice off still
+  silences everything instantly.
 
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic,
 > Inworld, or ElevenLabs.
@@ -99,8 +102,12 @@ you want to switch voice, provider or speed — then close it again.
 
 - In chat: say "voice on" and replies start speaking. "voice off" silences
   instantly — including whatever's playing right then.
+- Multiple projects at once: their replies line up and read one after another
+  instead of stomping each other. "voice off" (or the panel's Stop button) clears
+  the whole queue at once — for when the phone rings.
 - In the panel: switch provider, pick a voice, drag speed / expression, hit ▶ to
-  preview. Changes apply to the next spoken reply.
+  preview. The panel's Speak/preview takes over immediately (it's you, at the
+  keyboard); only the automatic per-reply speech queues.
 
 Keys are stored per-user **outside the repo** — `%APPDATA%\Readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or

@@ -146,6 +146,7 @@ export const DEFAULTS = {
   maxChars: num(process.env.READBACK_MAX_CHARS, 1800),
   lastPid: null,
   lastSpokenId: null,
+  lastSpokenBy: null,
   inworld: { ...PROVIDERS.inworld.defaults },
   elevenlabs: { ...PROVIDERS.elevenlabs.defaults },
 };

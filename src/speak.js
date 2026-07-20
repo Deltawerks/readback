@@ -8,7 +8,8 @@ import {
   writeEndMarker,
   stopPlayback,
 } from './audio.js';
-import { writeState } from './state.js';
+import { readState, writeState } from './state.js';
+import { enqueue, releaseTicket, waitTurn, currentEpoch, flushQueue } from './queue.js';
 import { log } from './log.js';
 
 // Speak text with low latency: split into sentence chunks, start playing the
@@ -21,17 +22,45 @@ import { log } from './log.js';
 //   then streams the remaining chunks in the background and returns.
 // wait:true  — for short-lived parents (hook worker, say.js). Awaits the entire
 //   utterance including playback, so the process stays alive until audio ends.
-export async function speak(text, st, { wait = false } = {}) {
+// queue:true — automatic (hook) speech: wait our turn in the cross-process FIFO
+//   queue so multiple sessions read in order instead of stomping each other.
+// queue:false (default) — manual speech (panel/CLI): take over immediately.
+export async function speak(text, st, { wait = false, queue = false } = {}) {
   const chunks = chunkForSpeech(text);
   if (!chunks.length) return { spoken: 0 };
 
-  stopPlayback(); // kill-on-new: stop any prior stream first
+  // Take our place in line. (enqueue is a couple of file ops; when nothing else
+  // is talking, waitTurn returns on the first pass with no sleep — no latency.)
+  const ticket = enqueue();
+  if (queue) {
+    // Wait politely behind any active or queued utterance. Give up if voice is
+    // turned off, or a stop/flush clears the line, while we wait.
+    const ok = await waitTurn(ticket, currentEpoch(), {
+      stillWanted: () => readState().enabled,
+    });
+    if (!ok) {
+      releaseTicket(ticket);
+      return { spoken: 0, aborted: true };
+    }
+    // Our turn — the prior utterance has finished. Do NOT stop anything.
+  } else {
+    // Manual/interactive: take over now. Kill current audio and clear the queue,
+    // then hold the line (our ticket) so incoming hook speech waits behind us.
+    stopPlayback();
+    flushQueue();
+  }
+
   const dir = newStreamDir();
   const player = spawnStreamPlayer(dir);
   // Attach the close listener up front so a fast utterance can't emit 'close'
   // before we await it.
   const closed = once(player, 'close');
   writeState({ lastPid: player.pid });
+  // Release our ticket the instant playback ends — in every mode, including
+  // wait:false where the player outlives this function — so the next in line
+  // can start.
+  const release = () => releaseTicket(ticket);
+  closed.then(release, release);
 
   // First chunk synchronously — surfaces errors and starts audio ASAP.
   let first;
@@ -40,6 +69,7 @@ export async function speak(text, st, { wait = false } = {}) {
   } catch (err) {
     writeEndMarker(dir, 0); // let the waiting player exit cleanly
     stopPlayback();
+    releaseTicket(ticket);
     throw err;
   }
   writeChunk(dir, 0, first);
