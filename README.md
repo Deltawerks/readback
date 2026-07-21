@@ -114,8 +114,10 @@ Keys are stored per-user **outside the repo**: `%APPDATA%\Readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
 cloud-synced folder can't sync your key with it. Override the location with
 `READBACK_STATE_DIR`. Replies are cleaned before speaking (code blocks dropped,
-links flattened, markdown/emoji stripped) and long replies are truncated with a
-spoken "the rest is on screen".
+links flattened, markdown/emoji stripped). Extremely long replies are capped
+with a spoken "the rest is on screen", but the cap is deliberately high so it
+acts as a backstop rather than clipping normal replies. Set
+`READBACK_MAX_CHARS` if you want a shorter ceiling on how long a read can run.
 
 > **Upgrading from an earlier version?** Your key and settings are copied to the
 > new location automatically on first run. The originals are left in the repo's

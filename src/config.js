@@ -143,7 +143,11 @@ export function keyHint(provider = 'inworld') {
 export const DEFAULTS = {
   provider: process.env.READBACK_PROVIDER || 'inworld',
   enabled: false,
-  maxChars: num(process.env.READBACK_MAX_CHARS, 1800),
+  // Generous on purpose: this is a backstop against a pathological wall of text,
+  // not a normal-reply limit. 1800 silently cut the tail off ~15% of replies,
+  // and it was always the long summaries (the part worth hearing). Lower it via
+  // READBACK_MAX_CHARS if you'd rather cap how long a read can run.
+  maxChars: num(process.env.READBACK_MAX_CHARS, 12000),
   lastPid: null,
   lastSpokenId: null,
   lastSpokenBy: null,
