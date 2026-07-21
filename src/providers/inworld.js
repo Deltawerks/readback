@@ -5,13 +5,12 @@ const VOICES_URL = 'https://api.inworld.ai/voices/v1/voices';
 
 export const label = 'Inworld';
 
-// mini first, and it is the default: it costs half what max does per character
-// ($5 vs $10 per 1M) and is plenty for reading replies aloud. Reach for max only
-// if you want the extra richness and don't mind paying double for it.
+// mini is the default: it costs half what max does per character and is plenty
+// for reading replies aloud.
 export const models = [
-  { id: 'inworld-tts-1.5-mini', label: 'inworld-tts-1.5-mini (cheapest)' },
-  { id: 'inworld-tts-1.5-max', label: 'inworld-tts-1.5-max (richer, 2x cost)' },
-  { id: 'inworld-tts-2', label: 'inworld-tts-2 (flagship)' },
+  { id: 'inworld-tts-1.5-mini', label: 'inworld-tts-1.5-mini' },
+  { id: 'inworld-tts-1.5-max', label: 'inworld-tts-1.5-max' },
+  { id: 'inworld-tts-2', label: 'inworld-tts-2' },
 ];
 
 // Tuning knobs the panel renders for this provider.
