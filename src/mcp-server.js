@@ -44,9 +44,13 @@ server.registerTool(
     inputSchema: {},
   },
   async () => {
+    // Record "off" first, then clear the queue, then kill audio. Stopping first
+    // frees the line while voice still reads as on, so the next queued reply
+    // starts talking and "voice off" appears to do nothing.
+    const st = writeState({ enabled: false });
+    flushQueue();
     stopPlayback();
-    flushQueue(); // clear any queued sessions too ("silence right now")
-    return text(`🔇 ${summarize(writeState({ enabled: false }))}`);
+    return text(`🔇 ${summarize(st)}`);
   }
 );
 
@@ -69,8 +73,8 @@ server.registerTool(
     inputSchema: {},
   },
   async () => {
+    flushQueue(); // clear the queue first, so nothing can claim the freed line
     stopPlayback();
-    flushQueue(); // clear the queue as well, so "stop" means stop everything
     return text('⏹ stopped playback and cleared the queue (voice stays armed)');
   }
 );

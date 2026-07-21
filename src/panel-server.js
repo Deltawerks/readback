@@ -157,11 +157,14 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/state' && req.method === 'POST') {
       const body = await readBody(req);
-      if (body.enabled === false) { stopPlayback(); flushQueue(); }
       const top = {};
       if (body.enabled !== undefined) top.enabled = body.enabled;
       if (body.provider !== undefined && PROVIDER_IDS.includes(body.provider)) top.provider = body.provider;
       let st = Object.keys(top).length ? writeState(top) : readState();
+      // Silence only AFTER the state records voice as off. Killing audio first
+      // frees the queue while enabled still reads true, so the next queued reply
+      // grabs the line and keeps talking, making the toggle look broken.
+      if (body.enabled === false) { flushQueue(); stopPlayback(); }
       if (body.config && typeof body.config === 'object') {
         st = updateProviderConfig(st.provider, sanitizeConfig(body.config));
       }
@@ -198,8 +201,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/stop' && req.method === 'POST') {
-      stopPlayback();
+      // Clear the queue first, then kill audio. The reverse order lets a queued
+      // reply claim the freed line before the flush lands.
       flushQueue();
+      stopPlayback();
       return send(res, 200, { ok: true });
     }
 
