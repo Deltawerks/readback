@@ -3,7 +3,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { ROOT, PORT, setApiKey, hasApiKey, keyHint } from './config.js';
+import { ROOT, PORT, REMOTE_ORIGINS, setApiKey, hasApiKey, keyHint } from './config.js';
 import { readState, writeState, updateProviderConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
@@ -34,21 +34,29 @@ function keyStatus() {
 }
 
 // State plus panel metadata (provider descriptors + masked key status). Never
-// includes raw keys.
-function stateResponse(st) {
-  return { ...(st || readState()), providers: providerMeta(), keys: keyStatus() };
+// includes raw keys. A remote caller gets no key status at all: even the masked
+// last-4 hint is the local panel's business, not a dashboard's.
+function stateResponse(st, remote = false) {
+  const base = { ...(st || readState()), providers: providerMeta() };
+  return remote ? base : { ...base, keys: keyStatus() };
 }
 
 function send(res, status, body, type = 'application/json') {
   const payload = type === 'application/json' ? JSON.stringify(body) : body;
-  res.writeHead(status, {
+  const headers = {
     'Content-Type': type,
     'Cache-Control': 'no-store',
     // Nothing here should ever be framed: an overlay could otherwise induce
     // clicks on the panel's own controls, which the origin check would allow.
     'X-Frame-Options': 'DENY',
     'Content-Security-Policy': "frame-ancestors 'none'",
-  });
+  };
+  // Set by the handler only for an allowlisted remote origin on an allowed route.
+  if (res.corsOrigin) {
+    headers['Access-Control-Allow-Origin'] = res.corsOrigin;
+    headers.Vary = 'Origin';
+  }
+  res.writeHead(status, headers);
   res.end(payload);
 }
 
@@ -79,6 +87,20 @@ function isSameOriginLocal(req) {
   if (site && site !== 'same-origin' && site !== 'none') return false;
   const origin = req.headers.origin;
   return !origin || SELF_ORIGINS.has(origin);
+}
+
+// A named remote origin may touch exactly one route, and only to read voice
+// state or flip it on/off. /api/key, /api/voices, /api/say and /api/stop stay
+// strictly loopback: a remote page must never change the key, burn provider
+// quota, or make this machine talk. The loopback Host check still applies, so
+// pointing a hostname at 127.0.0.1 gains nothing even for a listed origin.
+const REMOTE_ROUTES = new Set(['/api/state']);
+
+function remoteAllowed(req, pathname) {
+  const origin = req.headers.origin;
+  if (!origin || !REMOTE_ORIGINS.has(origin)) return false;
+  if (!REMOTE_ROUTES.has(pathname)) return false;
+  return LOOPBACK_HOSTS.has(req.headers.host);
 }
 
 function readBody(req) {
@@ -129,9 +151,27 @@ const server = http.createServer(async (req, res) => {
     }
     const { pathname } = url;
 
+    const remoteOk = remoteAllowed(req, pathname);
+    if (remoteOk) res.corsOrigin = req.headers.origin;
+
+    // CORS preflight for an allowlisted origin. Answered before the origin gate
+    // because a preflight carries no credentials and reveals nothing.
+    if (req.method === 'OPTIONS' && remoteOk) {
+      res.writeHead(204, {
+        'Access-Control-Allow-Origin': req.headers.origin,
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        // Chrome Private Network Access: public origin reaching loopback.
+        'Access-Control-Allow-Private-Network': 'true',
+        'Access-Control-Max-Age': '600',
+        Vary: 'Origin',
+      });
+      return res.end();
+    }
+
     // Applies to every route, not just /api/: the static routes would otherwise
     // still answer a rebound host, and their errors reveal the install path.
-    if (!isSameOriginLocal(req)) {
+    if (!isSameOriginLocal(req) && !remoteOk) {
       return send(res, 403, { error: 'forbidden' });
     }
 
@@ -152,23 +192,28 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/state' && req.method === 'GET') {
-      return send(res, 200, stateResponse());
+      return send(res, 200, stateResponse(null, remoteOk));
     }
 
     if (pathname === '/api/state' && req.method === 'POST') {
       const body = await readBody(req);
       const top = {};
       if (body.enabled !== undefined) top.enabled = body.enabled;
-      if (body.provider !== undefined && PROVIDER_IDS.includes(body.provider)) top.provider = body.provider;
+      // A remote origin may ONLY flip voice on/off. Switching provider or
+      // editing voice/model/tuning changes what gets spent and how it sounds,
+      // and a dashboard button has no business reaching that far.
+      if (!remoteOk && body.provider !== undefined && PROVIDER_IDS.includes(body.provider)) {
+        top.provider = body.provider;
+      }
       let st = Object.keys(top).length ? writeState(top) : readState();
       // Silence only AFTER the state records voice as off. Killing audio first
       // frees the queue while enabled still reads true, so the next queued reply
       // grabs the line and keeps talking, making the toggle look broken.
       if (body.enabled === false) { flushQueue(); stopPlayback(); }
-      if (body.config && typeof body.config === 'object') {
+      if (!remoteOk && body.config && typeof body.config === 'object') {
         st = updateProviderConfig(st.provider, sanitizeConfig(body.config));
       }
-      return send(res, 200, stateResponse(st));
+      return send(res, 200, stateResponse(st, remoteOk));
     }
 
     if (pathname === '/api/key' && req.method === 'POST') {

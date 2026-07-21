@@ -88,6 +88,17 @@ export const STREAM_SCRIPT = path.join(ROOT, 'scripts', 'play-stream.ps1');
 
 export const PORT = num(process.env.READBACK_PORT, 7717);
 
+// Origins outside this machine that may read voice state and flip voice on/off,
+// comma-separated. EMPTY BY DEFAULT: the panel stays strictly loopback unless
+// you deliberately name an origin, so a stock install grants nothing. Anything
+// listed here can toggle your voice, so only list a site you control.
+export const REMOTE_ORIGINS = new Set(
+  (process.env.READBACK_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
 // --- API keys (per provider) ---
 const ENV_KEY_NAME = { inworld: 'INWORLD_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY' };
 const SECRET_FIELD = { inworld: 'inworldApiKey', elevenlabs: 'elevenlabsApiKey' };
