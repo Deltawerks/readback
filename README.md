@@ -137,6 +137,12 @@ acts as a backstop rather than clipping normal replies. Set
   your API key go to whichever provider you picked (Inworld or ElevenLabs) over
   HTTPS, and nowhere else. Readback has no servers, no telemetry, no analytics,
   and no update check.
+- **It costs money per character spoken.** Readback defaults to the cheapest
+  sensible model (Inworld `tts-1.5-mini`, $5 per million characters; `max` is
+  double that for a bit more richness). Worth knowing: if you add the hook to
+  your global `settings.json`, it speaks in *every* project where voice is on,
+  which adds up faster than you'd guess. Keep it per-project, or toggle voice
+  off when you're not listening.
 - Trouble? Check `readback.log` in `%LOCALAPPDATA%\Readback` on Windows
   (throwaway data is kept out of the roaming profile), or alongside the state dir
   otherwise.

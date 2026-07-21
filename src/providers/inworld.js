@@ -5,9 +5,12 @@ const VOICES_URL = 'https://api.inworld.ai/voices/v1/voices';
 
 export const label = 'Inworld';
 
+// mini first, and it is the default: it costs half what max does per character
+// ($5 vs $10 per 1M) and is plenty for reading replies aloud. Reach for max only
+// if you want the extra richness and don't mind paying double for it.
 export const models = [
-  { id: 'inworld-tts-1.5-max', label: 'inworld-tts-1.5-max (rich)' },
-  { id: 'inworld-tts-1.5-mini', label: 'inworld-tts-1.5-mini (fast)' },
+  { id: 'inworld-tts-1.5-mini', label: 'inworld-tts-1.5-mini (cheapest)' },
+  { id: 'inworld-tts-1.5-max', label: 'inworld-tts-1.5-max (richer, 2x cost)' },
   { id: 'inworld-tts-2', label: 'inworld-tts-2 (flagship)' },
 ];
 
@@ -17,7 +20,7 @@ export const knobs = [
   { key: 'temperature', label: 'Expression', min: 0, max: 2, step: 0.1, hint: 'Voice temperature: higher is more expressive' },
 ];
 
-export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-1.5-max', speed: 1.3, temperature: 0.1 };
+export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-1.5-mini', speed: 1.3, temperature: 0.1 };
 
 // The key is a pre-base64 string sent as `Authorization: Basic <key>`.
 export async function synthesize(text, cfg, apiKey) {
