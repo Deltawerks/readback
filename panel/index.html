@@ -289,9 +289,27 @@ async function loadVoices() {
   catch (e) { fillVoices([]); toast('Could not load voices: ' + e.message, true); }
   renderStatus();
 }
-async function renderAll() {
+// Everything redrawable from state alone. Deliberately excludes loadVoices():
+// that one calls the provider API, so it must not run on every refresh.
+function renderLocal() {
   renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus();
+}
+async function renderAll() {
+  renderLocal();
   await loadVoices();
+}
+
+// The panel used to read state once at load and never again, so anything that
+// changed voice elsewhere (the MCP tools, a dashboard button, a second tab) left
+// this page showing a stale toggle: it would say ON while voice was actually
+// off. Re-read whenever the tab is looked at, so the toggle can't lie.
+async function refreshState() {
+  try {
+    absorb(await api('/api/state'));
+    renderLocal();
+  } catch {
+    // server gone; keep the last known UI rather than blanking it
+  }
 }
 
 async function saveKey() {
@@ -307,7 +325,11 @@ async function saveKey() {
 }
 async function say(text) {
   try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
-    if (r.ok) toast('Speaking…'); else toast('Nothing to speak', true);
+    // Preview deliberately works while muted, which is confusing on its own: a
+    // successful test says nothing about whether replies will actually speak.
+    // Say so, rather than letting it read as "everything is fine".
+    if (r.ok) toast(state.enabled ? 'Speaking…' : 'Speaking (auto-speak is OFF)');
+    else toast('Nothing to speak', true);
   } catch (e) { toast('Speak failed: ' + e.message, true); }
 }
 
@@ -320,6 +342,8 @@ $('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('spe
 $('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }); toast('Stopped'); } catch (e) {} });
 $('saveKey').addEventListener('click', saveKey);
 $('apiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });
+window.addEventListener('focus', refreshState);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshState(); });
 
 (async function init() {
   try { const s = await api('/api/state'); absorb(s); }
