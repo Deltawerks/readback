@@ -5,27 +5,69 @@ import {
   readdirSync,
   rmSync,
   mkdirSync,
+  unlinkSync,
 } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR, STREAM_SCRIPT } from './config.js';
 import { readState, writeState, ensureStateDir } from './state.js';
 
-// Kill whatever is currently playing (the streaming player, tracked by PID).
+// One empty file per live player, named by its real pid, written when the player
+// spawns and removed when it exits. stopPlayback kills exactly these pids. This
+// is what makes "voice off" reliable: it doesn't depend on a single tracked pid
+// (which goes stale during a queue handoff) or on a WMI command-line lookup
+// (which can miss a process whose command line isn't readable).
+const PLAYERS_DIR = path.join(CACHE_DIR, 'players');
+
+// Kill every streaming player by its command-line signature. The tracked
+// lastPid is not enough on its own: during a queue handoff (one project's reply
+// finishing, the next taking the line) lastPid briefly points at the just-ended
+// player while a new one is starting, so killing lastPid alone let a reply keep
+// talking straight through "voice off". Matching on play-stream.ps1 kills
+// whatever is actually making sound, whichever worker owns it.
+function killAllPlayers() {
+  try {
+    execFileSync(
+      'powershell',
+      [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-Command',
+        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*play-stream.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
+      ],
+      { stdio: 'ignore', windowsHide: true, timeout: 5000 }
+    );
+  } catch {
+    // best effort; the fast lastPid kill above has usually handled it already
+  }
+}
+
+// Stop playback now. Synchronous, so a following speak() can't spawn a player
+// that overlaps this one.
 export function stopPlayback() {
-  const { lastPid } = readState();
-  if (lastPid) {
+  // Kill every recorded player by pid. Robust: covers all live players, not just
+  // the last, and doesn't rely on WMI being able to read a command line.
+  let pids = [];
+  try {
+    pids = readdirSync(PLAYERS_DIR).filter((f) => /^\d+$/.test(f));
+  } catch {
+    // no players dir yet
+  }
+  for (const pid of pids) {
     try {
-      // Synchronous kill: block until the old player is actually terminated
-      // before returning, so a following speak() can't spawn a second player
-      // that overlaps audio with this one (kill-on-new must really kill first).
-      execFileSync('taskkill', ['/PID', String(lastPid), '/T', '/F'], {
-        stdio: 'ignore',
-        windowsHide: true,
-      });
+      execFileSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore', windowsHide: true });
     } catch {
-      // already gone / taskkill failed, that's fine
+      // already gone
+    }
+    try {
+      unlinkSync(path.join(PLAYERS_DIR, pid));
+    } catch {
+      // its own close handler beat us to it
     }
   }
+  // Backstop for anything that slipped through (a player whose pid we failed to
+  // record): sweep by command-line signature too.
+  killAllPlayers();
   writeState({ lastPid: null });
 }
 
@@ -89,7 +131,7 @@ export function writeEndMarker(dir, count) {
 // fails to run). Returns the child; the caller stores its PID and either
 // unref()s it (long-lived parent) or awaits its 'close' (short-lived parent).
 export function spawnStreamPlayer(dir) {
-  return spawn(
+  const player = spawn(
     'powershell',
     [
       '-NoProfile',
@@ -104,4 +146,21 @@ export function spawnStreamPlayer(dir) {
     ],
     { stdio: 'ignore', windowsHide: true }
   );
+  // Record this player's pid so any process's stopPlayback can find and kill it,
+  // and clear the record when it exits on its own.
+  const marker = path.join(PLAYERS_DIR, String(player.pid));
+  try {
+    mkdirSync(PLAYERS_DIR, { recursive: true });
+    writeFileSync(marker, '');
+  } catch {
+    // best effort; killAllPlayers() is the backstop if we couldn't record it
+  }
+  player.on('close', () => {
+    try {
+      unlinkSync(marker);
+    } catch {
+      // already removed by a stopPlayback sweep
+    }
+  });
+  return player;
 }

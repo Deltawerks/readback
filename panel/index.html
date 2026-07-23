@@ -333,7 +333,11 @@ async function say(text) {
   } catch (e) { toast('Speak failed: ' + e.message, true); }
 }
 
-$('toggle').addEventListener('click', async () => { await patchTop({ enabled: !state.enabled }); renderStatus(); });
+$('toggle').addEventListener('click', async () => {
+  state.enabled = !state.enabled; renderStatus();   // optimistic: the click feels instant
+  await patchTop({ enabled: state.enabled });        // then reconcile with the server's answer
+  renderStatus();
+});
 $('voice').addEventListener('change', (e) => { patchConfig({ voiceId: e.target.value }); state[prov()].voiceId = e.target.value; renderStatus(); });
 $('model').addEventListener('change', (e) => { patchConfig({ modelId: e.target.value }); });
 $('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
@@ -344,6 +348,14 @@ $('saveKey').addEventListener('click', saveKey);
 $('apiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });
 window.addEventListener('focus', refreshState);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshState(); });
+
+// Poll lightly so the toggle stays truthful even on a screen that never loses
+// focus (an always-open dashboard). Only the status line + toggle are redrawn,
+// never the dropdowns, so it can't disturb a selection in progress. This is what
+// stops the panel from ever displaying "on" while voice is actually off.
+setInterval(async () => {
+  try { absorb(await api('/api/state')); renderStatus(); } catch {}
+}, 3000);
 
 (async function init() {
   try { const s = await api('/api/state'); absorb(s); }

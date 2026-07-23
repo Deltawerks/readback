@@ -35,10 +35,18 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   if (queue) {
     // Wait politely behind any active or queued utterance. Give up if voice is
     // turned off, or a stop/flush clears the line, while we wait.
-    const ok = await waitTurn(ticket, currentEpoch(), {
+    const epoch = currentEpoch();
+    const ok = await waitTurn(ticket, epoch, {
       stillWanted: () => readState().enabled,
     });
     if (!ok) {
+      releaseTicket(ticket);
+      return { spoken: 0, aborted: true };
+    }
+    // A stop or voice-off can land in the sliver between being handed the line
+    // and spawning the player below. Without this re-check, that reply would
+    // start talking a beat after you hit "off". Re-read and bail if so.
+    if (currentEpoch() !== epoch || !readState().enabled) {
       releaseTicket(ticket);
       return { spoken: 0, aborted: true };
     }
