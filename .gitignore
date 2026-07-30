@@ -8,3 +8,6 @@ hooks-snippet.json
 assets/readback.ico
 assets/voicebox.ico
 .claude/launch.json
+.env.bak*
+.env.*.bak
+docs/

@@ -51,8 +51,17 @@ function num(value, def) {
 // repo: cloning into a cloud-synced or shared folder would otherwise sync your
 // API key along with it. Override with READBACK_STATE_DIR (tests use this).
 function defaultStateDir() {
-  if (process.platform === 'win32' && process.env.APPDATA) {
-    return path.join(process.env.APPDATA, 'Readback');
+  if (process.platform === 'win32') {
+    // APPDATA is normally set, but a process launched from a stripped
+    // environment (a login/startup task, a service) can be missing it. Falling
+    // through to a different directory in that case is worse than useless: the
+    // panel and the hook workers end up on SEPARATE state files, so the toggle
+    // silently stops controlling anything. USERPROFILE gets us to the same
+    // place without depending on APPDATA being populated.
+    const base =
+      process.env.APPDATA ||
+      (process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData', 'Roaming'));
+    if (base) return path.join(base, 'Readback');
   }
   const base =
     process.env.XDG_CONFIG_HOME ||

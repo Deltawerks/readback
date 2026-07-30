@@ -3,7 +3,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { ROOT, PORT, REMOTE_ORIGINS, setApiKey, hasApiKey, keyHint } from './config.js';
+import { ROOT, PORT, STATE_DIR, REMOTE_ORIGINS, setApiKey, hasApiKey, keyHint } from './config.js';
 import { readState, writeState, updateProviderConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
@@ -175,7 +175,10 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: 'forbidden' });
     }
 
-    if (pathname === '/health') return send(res, 200, { ok: true });
+    // stateDir is reported so a split brain is diagnosable in one request: if
+    // this doesn't match what the hook workers resolve, the toggle will appear
+    // to work while changing nothing they can see.
+    if (pathname === '/health') return send(res, 200, { ok: true, stateDir: STATE_DIR, pid: process.pid });
 
     if (pathname === '/' || pathname === '/index.html') {
       const html = await readFile(INDEX, 'utf8');
