@@ -87,6 +87,13 @@ export function releaseTicket(ticket) {
 
 // Drop tickets whose owning process has died, so a crashed or killed session
 // can never wedge the queue behind it.
+// No utterance legitimately holds the line this long. Past it a ticket is
+// treated as abandoned regardless of what its pid looks like — pids are reused,
+// especially across a reboot, so "its pid is alive" can be a different program
+// entirely. Without this, one leftover ticket silently blocks every reply
+// forever and voice just stops working the next day.
+const MAX_TICKET_AGE_MS = 10 * 60 * 1000;
+
 export function cleanStale() {
   let files;
   try {
@@ -98,12 +105,16 @@ export function cleanStale() {
     if (!f.endsWith('.json')) continue;
     const p = path.join(QUEUE_DIR, f);
     let pid = null;
+    let ts = 0;
     try {
-      pid = JSON.parse(readFileSync(p, 'utf8')).pid;
+      const t = JSON.parse(readFileSync(p, 'utf8'));
+      pid = t.pid;
+      ts = t.ts || 0;
     } catch {
       // unreadable / torn write; treat as dead and remove
     }
-    if (!pidAlive(pid)) {
+    const tooOld = ts > 0 && Date.now() - ts > MAX_TICKET_AGE_MS;
+    if (tooOld || !pidAlive(pid)) {
       try {
         unlinkSync(p);
       } catch {

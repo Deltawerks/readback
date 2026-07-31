@@ -6,6 +6,7 @@ import {
   rmSync,
   mkdirSync,
   unlinkSync,
+  statSync,
 } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR, STREAM_SCRIPT } from './config.js';
@@ -54,10 +55,22 @@ export function stopPlayback() {
     // no players dir yet
   }
   for (const pid of pids) {
+    const marker = path.join(PLAYERS_DIR, pid);
+    // A marker left behind by a crash or a reboot must never be acted on: pids
+    // get reused, so killing a stale one could terminate an unrelated program.
+    // Nothing plays for ten minutes, so anything older is definitely garbage.
+    let stale = false;
     try {
-      execFileSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      stale = Date.now() - statSync(marker).mtimeMs > 10 * 60 * 1000;
     } catch {
-      // already gone
+      stale = true;
+    }
+    if (!stale) {
+      try {
+        execFileSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      } catch {
+        // already gone
+      }
     }
     try {
       unlinkSync(path.join(PLAYERS_DIR, pid));

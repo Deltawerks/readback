@@ -193,8 +193,17 @@ async function api(path, opts) {
 function absorb(s) { meta = s.providers || meta; keys = s.keys || keys; delete s.providers; delete s.keys; state = s; }
 
 async function patchTop(body) {
-  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })); }
-  catch (e) { toast('Could not save: ' + e.message, true); }
+  try {
+    absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+    syncError = '';
+    return true;
+  } catch (e) {
+    // The write did NOT happen. Say so loudly and let the caller re-sync, rather
+    // than leaving the switch showing a change the server never accepted.
+    syncError = e.message;
+    toast('Could not save: ' + e.message, true);
+    return false;
+  }
 }
 async function patchConfig(config) {
   try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) })); }
@@ -263,11 +272,24 @@ function voiceName() {
   const dn = v ? (v.displayName || v.voiceId) : cfg().voiceId;
   return dn ? String(dn).split(' - ')[0].trim() : '';
 }
+// Set when we can't reach the server. The panel must NEVER keep showing a
+// confident on/off it can no longer verify: a switch that lies is worse than one
+// that says it doesn't know, because you go hunting for a bug that isn't there.
+let syncError = '';
+
 function renderStatus() {
   const on = !!state.enabled;
   $('toggle').setAttribute('aria-checked', on ? 'true' : 'false');
   $('spk').className = 'spk ' + (on ? 'on' : 'off');
-  $('dot').className = 'dot ' + (on ? 'on' : 'off');
+  $('dot').className = 'dot ' + (syncError ? 'off' : on ? 'on' : 'off');
+  if (syncError) {
+    $('toggle').setAttribute('aria-checked', 'false');
+    $('spk').className = 'spk off';
+    $('status').textContent = 'NOT CONNECTED - ' + syncError + ' (reload the page)';
+    $('status').style.color = 'var(--crit)';
+    return;
+  }
+  $('status').style.color = '';
   $('status').textContent = (on ? 'voice on' : 'muted') + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (voiceName() || 'no voice') + ' · localhost:' + location.port;
 }
 function fillVoices(voices) {
@@ -306,9 +328,13 @@ async function renderAll() {
 async function refreshState() {
   try {
     absorb(await api('/api/state'));
+    syncError = '';
     renderLocal();
-  } catch {
-    // server gone; keep the last known UI rather than blanking it
+  } catch (e) {
+    // Server unreachable. Surface it instead of silently keeping a stale
+    // display, which is what made a dead toggle look like a working one.
+    syncError = e.message;
+    renderStatus();
   }
 }
 
@@ -334,8 +360,13 @@ async function say(text) {
 }
 
 $('toggle').addEventListener('click', async () => {
-  state.enabled = !state.enabled; renderStatus();   // optimistic: the click feels instant
-  await patchTop({ enabled: state.enabled });        // then reconcile with the server's answer
+  const want = !state.enabled;
+  state.enabled = want; renderStatus();              // optimistic: the click feels instant
+  const ok = await patchTop({ enabled: want });      // absorb() overwrites state from the server
+  if (!ok) {
+    // Never leave the switch showing something the server didn't confirm.
+    await refreshState();
+  }
   renderStatus();
 });
 $('voice').addEventListener('change', (e) => { patchConfig({ voiceId: e.target.value }); state[prov()].voiceId = e.target.value; renderStatus(); });
@@ -353,9 +384,7 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) refr
 // focus (an always-open dashboard). Only the status line + toggle are redrawn,
 // never the dropdowns, so it can't disturb a selection in progress. This is what
 // stops the panel from ever displaying "on" while voice is actually off.
-setInterval(async () => {
-  try { absorb(await api('/api/state')); renderStatus(); } catch {}
-}, 3000);
+setInterval(refreshState, 3000);
 
 (async function init() {
   try { const s = await api('/api/state'); absorb(s); }
