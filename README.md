@@ -24,6 +24,10 @@ phone rings.
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic,
 > Inworld, or ElevenLabs.
 
+**Already using it?** See the [changelog](CHANGELOG.md). 0.4.0 fixes several
+real bugs, including "voice off doesn't stop playback" and a case where the
+panel toggle appeared to work while changing nothing. `git pull` to update.
+
 ---
 
 ## How it works
