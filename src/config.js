@@ -91,6 +91,12 @@ function defaultCacheDir() {
 
 export const CACHE_DIR = defaultCacheDir();
 export const STATE_FILE = path.join(STATE_DIR, 'state.json');
+// Transient bookkeeping (which player is running, which reply was last spoken)
+// lives in its OWN file. It is written constantly by every speaking worker,
+// while state.json holds settings you change by hand. Keeping them together
+// meant a worker recording its pid could write back a stale copy of `enabled`
+// and silently undo a voice-off you had just pressed.
+export const RUNTIME_FILE = path.join(CACHE_DIR, 'runtime.json');
 export const LOG_FILE = path.join(CACHE_DIR, 'readback.log');
 export const SECRET_FILE = path.join(STATE_DIR, 'secret.json');
 export const STREAM_SCRIPT = path.join(ROOT, 'scripts', 'play-stream.ps1');

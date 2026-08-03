@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- **Voice off now stays off.** Turning voice off while a reply was speaking
+  stopped that reply, but the next one spoke anyway, and only a second on-then-off
+  cycle made it stick.
+
+  Settings and transient bookkeeping shared one file. Every speaking worker
+  rewrites that file to record which player is running and which reply it last
+  spoke, and it did so by reading the whole file, merging its change, and writing
+  it all back. When a toggle landed between a worker's read and its write, the
+  worker wrote back the `enabled: true` it had read a moment earlier and silently
+  undid the toggle. Because a worker writes exactly when speech starts, hitting
+  the toggle during speech is precisely when it was most likely to be lost.
+
+  Runtime bookkeeping now lives in its own file, so a worker recording its player
+  never opens the settings file and cannot overwrite your choice.
+
 ## 0.4.0
 
 **If you are on an earlier version, update.** Several of these are fixes for
