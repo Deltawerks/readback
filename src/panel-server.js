@@ -314,6 +314,29 @@ server.on('error', async (err) => {
 
 const noOpen = process.env.READBACK_NO_OPEN || process.argv.includes('--no-open');
 
+// Prove we can actually round-trip the state file before serving. A panel that
+// answers requests but cannot reach its state file is the worst possible
+// failure: the toggle appears to work, the status line says "voice on", and
+// nothing ever speaks, with no error anywhere. Refusing to start turns that into
+// an honest "panel not running", which the page already reports as NOT
+// CONNECTED. Seen in the wild on a panel launched at login.
+function verifyStatePersistence() {
+  const probe = `readback-probe-${process.pid}-${Date.now()}`;
+  try {
+    const before = readState().enabled;
+    writeState({ lastSpokenBy: probe });
+    if (readState().lastSpokenBy !== probe) throw new Error('state write did not read back');
+    writeState({ lastSpokenBy: null });
+    if (readState().enabled !== before) throw new Error('state round-trip altered settings');
+    return true;
+  } catch (err) {
+    log(`panel: FATAL, cannot persist state in ${STATE_DIR}: ${err.message}`);
+    return false;
+  }
+}
+
+if (!verifyStatePersistence()) process.exit(1);
+
 server.listen(PORT, '127.0.0.1', () => {
   log(`panel listening on ${localUrl}`);
   if (!noOpen) openBrowser(localUrl);

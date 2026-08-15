@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.2
+
+### Fixed
+
+- **The panel refuses to start if it cannot reach its state file.** A panel
+  launched at login was seen answering requests normally while never touching
+  the filesystem: it reported a plausible state directory, served values that
+  existed in no file, and silently discarded every write. The toggle looked like
+  it worked, the status line read "voice on", and nothing ever spoke. There was
+  no error anywhere to find.
+
+  The panel now proves it can round-trip its state file before it serves, and
+  exits if it cannot. A panel that cannot work is now visibly not running, which
+  the page already reports as `NOT CONNECTED`, instead of quietly lying.
+
+- The bundled Windows startup script waits for the session to settle before
+  launching, and only pins the state directory if the environment actually
+  provided one. Starting too early is the likeliest way to get the wedged panel
+  described above.
+
 ## 0.4.1
 
 ### Fixed
