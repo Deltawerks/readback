@@ -5,11 +5,14 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-// Isolate every queue/state file into a throwaway dir BEFORE the modules load
-// (config.js resolves its paths at import time from READBACK_STATE_DIR, and
-// CACHE_DIR follows STATE_DIR when that override is set).
+// Isolate every queue/state file into a throwaway dir BEFORE the modules load.
+// config.js resolves its paths at import time, and settings and cache are two
+// separate overrides on purpose: CACHE_DIR deliberately does NOT follow
+// READBACK_STATE_DIR, because a launcher that set one and not the other used to
+// split the panel and the hook workers across different queue directories.
 const DIR = mkdtempSync(path.join(tmpdir(), 'readback-queue-'));
 process.env.READBACK_STATE_DIR = DIR;
+process.env.READBACK_CACHE_DIR = DIR;
 
 const {
   QUEUE_DIR,

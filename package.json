@@ -1,6 +1,6 @@
 {
   "name": "readback",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "type": "module",
   "description": "Windows-first, dual-provider (Inworld + ElevenLabs) voice output for Claude Code. Reads Claude's replies aloud, tuned from a GUI panel.",
   "license": "MIT",
@@ -12,6 +12,7 @@
     "panel": "node src/panel-server.js",
     "say": "node scripts/say.js",
     "voices": "node scripts/voices.js",
+    "where": "node scripts/where.js",
     "register": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register.ps1",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
     "test": "node --test"

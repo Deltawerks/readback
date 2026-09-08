@@ -117,7 +117,21 @@ you want to switch voice, provider or speed, then close it again.
 Keys are stored per-user **outside the repo**: `%APPDATA%\Readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
 cloud-synced folder can't sync your key with it. Override the location with
-`READBACK_STATE_DIR`. Replies are cleaned before speaking (code blocks dropped,
+`READBACK_STATE_DIR`.
+
+Working files (the log, the queue, the list of running players, the WAV chunks)
+live separately in `%LOCALAPPDATA%\Readback` (`~/.cache/readback` elsewhere), so
+they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
+
+> **If you override either path, set it for every Readback process, not just
+> one.** The panel, the MCP server and each hook worker resolve these
+> independently from the environment they were launched in. When they disagree,
+> the toggle appears to work and controls nothing, because the half that speaks
+> is reading different files than the half you clicked. `npm run where` prints
+> the resolved paths; run it from the panel's environment and from a Claude Code
+> session and compare. The panel also reports both at `/health`.
+
+Replies are cleaned before speaking (code blocks dropped,
 links flattened, markdown/emoji stripped). Extremely long replies are capped
 with a spoken "the rest is on screen", but the cap is deliberately high so it
 acts as a backstop rather than clipping normal replies. Set

@@ -78,15 +78,30 @@ export const LEGACY_STATE_DIRS = [
   path.join(ROOT, '.voicebox'),
 ];
 
-// Throwaway data (the log and multi-MB WAV chunks) goes in a local (never
-// roamed) dir, so it can't bloat a synced Windows profile. Follows STATE_DIR
-// when that's been overridden, to keep everything together for tests.
+// Throwaway data (the log, the queue, the player list and multi-MB WAV chunks)
+// goes in a local (never roamed) dir, so it can't bloat a synced Windows profile.
+//
+// This MUST resolve identically in every Readback process, because the queue and
+// the playback bookkeeping live here and the panel and the hook workers have to
+// find each other's files. It used to fall back to STATE_DIR whenever
+// READBACK_STATE_DIR was set, which looked like a convenience for tests and was a
+// trap in production: the Windows startup script pinned READBACK_STATE_DIR for
+// the panel, Claude Code launches the hook workers without it, and the two halves
+// silently kept their queue, playback epoch and player list in different folders.
+// Settings still agreed, so voice on/off looked fine, while "stop talking" swept
+// a directory that was always empty. Override this location on its own with
+// READBACK_CACHE_DIR, and set it for every process if you set it at all.
 function defaultCacheDir() {
-  if (process.env.READBACK_STATE_DIR) return STATE_DIR;
-  if (process.platform === 'win32' && process.env.LOCALAPPDATA) {
-    return path.join(process.env.LOCALAPPDATA, 'Readback');
+  if (process.env.READBACK_CACHE_DIR) return path.resolve(process.env.READBACK_CACHE_DIR);
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA
+      || (process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData', 'Local'));
+    if (base) return path.join(base, 'Readback');
+    return STATE_DIR;
   }
-  return STATE_DIR;
+  const base =
+    process.env.XDG_CACHE_HOME || (process.env.HOME ? path.join(process.env.HOME, '.cache') : '');
+  return base ? path.join(base, 'readback') : STATE_DIR;
 }
 
 export const CACHE_DIR = defaultCacheDir();

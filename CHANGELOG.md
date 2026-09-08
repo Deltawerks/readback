@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.4.4
+
+Voice off has been unreliable for several releases now, and each fix landed on a
+real bug without reaching the one underneath. Sorry. This is the one that was
+actually holding the toggle open, and it now has tests that fail without the fix.
+
+### Fixed
+
+- **Voice off stops what is playing, and stays off.** Settings and working files
+  are kept in two different places on purpose, but the cache location used to
+  fall back to the settings location whenever `READBACK_STATE_DIR` was set. That
+  read like a convenience for tests and was a trap in practice: any launcher that
+  set the override for the panel but not for the hook workers put the two halves
+  in different folders.
+
+  They still shared `state.json`, so voice on and off looked like it worked, and
+  the next reply really did stay quiet. But the queue, the playback epoch and the
+  list of running players were per-half, so the panel's "stop talking" swept a
+  directory that was always empty and cleared a queue nobody was waiting in.
+  Whatever was already speaking talked straight through it, and a reply already
+  queued behind it started up after.
+
+  The cache location no longer follows the settings location on any platform. It
+  has its own override, `READBACK_CACHE_DIR`, and both halves resolve it the same
+  way regardless of how they were launched.
+
+- **The panel checks its own work from outside itself.** Twice now a panel has
+  been found answering requests while its reads and writes were wrong together:
+  it served values that existed in no file and discarded every write, so every
+  check it ran against itself agreed with itself and passed. The startup
+  self-test and the save confirmation now both verify through a separate process,
+  which has its own view of the filesystem and cannot be fooled the same way.
+
+- **A save that fails now says so in plain language** instead of returning an
+  errno, and still never reports success. A toggle that did not reach disk shows
+  as an error on the page rather than as a switch that looks like it moved.
+
+### Added
+
+- `npm run where` prints every path Readback resolved. Run it from the panel's
+  environment and from a Claude Code session; if the two disagree, that is the
+  bug. `/health` now reports the cache directory alongside the state directory.
+
+- Tests covering the above: that pinning the settings directory cannot move the
+  cache directory, that the two overrides are independent, that a panel which
+  cannot save settings refuses to start, and that a toggle which cannot be saved
+  comes back as an error rather than a success.
+
+### Note
+
+The 0.4.2 notes described a "bundled" Windows startup script. There is no such
+script in this repo, only the manual launcher in `scripts/`. That entry has been
+corrected.
+
 ## 0.4.3
 
 ### Fixed
@@ -37,10 +91,11 @@
   exits if it cannot. A panel that cannot work is now visibly not running, which
   the page already reports as `NOT CONNECTED`, instead of quietly lying.
 
-- The bundled Windows startup script waits for the session to settle before
-  launching, and only pins the state directory if the environment actually
-  provided one. Starting too early is the likeliest way to get the wedged panel
-  described above.
+- Guidance for auto-starting the panel at login on Windows: wait for the session
+  to settle before launching. Starting too early is the likeliest way to get the
+  wedged panel described above. (This release note originally described a
+  "bundled" startup script. No such script ships in this repo; only the manual
+  launcher in `scripts/` does. Corrected in 0.4.4.)
 
 ## 0.4.1
 

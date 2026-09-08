@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
-import { ROOT, PORT, STATE_DIR, REMOTE_ORIGINS, setApiKey, hasApiKey, keyHint } from './config.js';
+import { ROOT, PORT, STATE_DIR, CACHE_DIR, REMOTE_ORIGINS, setApiKey, hasApiKey, keyHint } from './config.js';
 import { readState, writeState, updateProviderConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
@@ -178,7 +178,8 @@ const server = http.createServer(async (req, res) => {
     // stateDir is reported so a split brain is diagnosable in one request: if
     // this doesn't match what the hook workers resolve, the toggle will appear
     // to work while changing nothing they can see.
-    if (pathname === '/health') return send(res, 200, { ok: true, stateDir: STATE_DIR, pid: process.pid });
+    if (pathname === '/health')
+      return send(res, 200, { ok: true, stateDir: STATE_DIR, cacheDir: CACHE_DIR, pid: process.pid });
 
     if (pathname === '/' || pathname === '/index.html') {
       const html = await readFile(INDEX, 'utf8');
@@ -208,13 +209,22 @@ const server = http.createServer(async (req, res) => {
       if (!remoteOk && body.provider !== undefined && PROVIDER_IDS.includes(body.provider)) {
         top.provider = body.provider;
       }
-      let st = Object.keys(top).length ? writeState(top) : readState();
+      let st;
+      try {
+        st = Object.keys(top).length ? writeState(top) : readState();
+      } catch (err) {
+        // A failed save must read as a failed save on the page, not as an errno
+        // the user has to decode, and never as a toggle that looks like it took.
+        log(`panel: could not save settings: ${err.message}`);
+        return send(res, 500, { error: 'could not save the voice setting to disk' });
+      }
       // Confirm the change actually reached disk before reporting success.
       // writeState returns what it read back, so a mismatch means this panel
       // cannot persist settings. Saying 200 anyway is how a dead toggle ends up
       // looking like a working one while every reply keeps talking.
-      if (body.enabled !== undefined && st.enabled !== body.enabled) {
-        log('panel: voice setting did not persist; refusing to report success');
+      if (body.enabled !== undefined
+          && (st.enabled !== body.enabled || !persistedOnDisk('enabled', body.enabled))) {
+        log('panel: voice setting did not reach disk; refusing to report success');
         return send(res, 500, { error: 'could not save the voice setting to disk' });
       }
       // Silence only AFTER the state records voice as off. Killing audio first
@@ -322,6 +332,35 @@ server.on('error', async (err) => {
 
 const noOpen = process.env.READBACK_NO_OPEN || process.argv.includes('--no-open');
 
+// Reads the settings file from a SEPARATE process. Everything this panel checks
+// against itself passes when its own reads and writes are wrong together, which
+// is exactly the failure that shipped a dead toggle twice: the panel answered
+// normally, served values that existed in no file, and discarded every write. A
+// child process has its own view of the filesystem, so it is the only witness
+// here that cannot be fooled the same way.
+function stateFileOnDisk() {
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'read-state-file.js')], {
+    encoding: 'utf8',
+    timeout: 10000,
+    windowsHide: true,
+  });
+  if (r.error) throw new Error(r.error.message);
+  if (r.status !== 0) throw new Error(`state reader exited ${r.status}: ${(r.stderr || '').trim()}`);
+  const parsed = JSON.parse(r.stdout || '{}');
+  if (parsed.readbackReadError) throw new Error(parsed.readbackReadError);
+  return parsed;
+}
+
+// True only if the setting is genuinely on disk, not merely agreed to in memory.
+function persistedOnDisk(field, value) {
+  try {
+    return stateFileOnDisk()[field] === value;
+  } catch (err) {
+    log(`panel: cannot read the state file back: ${err.message}`);
+    return false;
+  }
+}
+
 // Prove we can actually round-trip the state file before serving. A panel that
 // answers requests but cannot reach its state file is the worst possible
 // failure: the toggle appears to work, the status line says "voice on", and
@@ -337,6 +376,12 @@ function verifyStatePersistence() {
     // and happily started a panel that could not persist the voice toggle.
     writeState({ probe });
     if (readState().probe !== probe) throw new Error('settings write did not read back');
+    // ...and confirm it from outside. Every check above passes in a panel whose
+    // own view of the file is stale or fabricated, which is how a panel that
+    // could not save anything started cleanly and served a dead toggle.
+    if (stateFileOnDisk().probe !== probe) {
+      throw new Error('the write never reached disk; this process is reading a stale copy');
+    }
     writeState({ probe: null });
     if (readState().enabled !== before) throw new Error('probe altered the voice setting');
     return true;
