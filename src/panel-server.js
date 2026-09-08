@@ -209,6 +209,14 @@ const server = http.createServer(async (req, res) => {
         top.provider = body.provider;
       }
       let st = Object.keys(top).length ? writeState(top) : readState();
+      // Confirm the change actually reached disk before reporting success.
+      // writeState returns what it read back, so a mismatch means this panel
+      // cannot persist settings. Saying 200 anyway is how a dead toggle ends up
+      // looking like a working one while every reply keeps talking.
+      if (body.enabled !== undefined && st.enabled !== body.enabled) {
+        log('panel: voice setting did not persist; refusing to report success');
+        return send(res, 500, { error: 'could not save the voice setting to disk' });
+      }
       // Silence only AFTER the state records voice as off. Killing audio first
       // frees the queue while enabled still reads true, so the next queued reply
       // grabs the line and keeps talking, making the toggle look broken.
@@ -324,13 +332,16 @@ function verifyStatePersistence() {
   const probe = `readback-probe-${process.pid}-${Date.now()}`;
   try {
     const before = readState().enabled;
-    writeState({ lastSpokenBy: probe });
-    if (readState().lastSpokenBy !== probe) throw new Error('state write did not read back');
-    writeState({ lastSpokenBy: null });
-    if (readState().enabled !== before) throw new Error('state round-trip altered settings');
+    // Must probe a SETTINGS field. This previously probed lastSpokenBy, which is
+    // a RUNTIME field kept in a different file, so it verified the wrong file
+    // and happily started a panel that could not persist the voice toggle.
+    writeState({ probe });
+    if (readState().probe !== probe) throw new Error('settings write did not read back');
+    writeState({ probe: null });
+    if (readState().enabled !== before) throw new Error('probe altered the voice setting');
     return true;
   } catch (err) {
-    log(`panel: FATAL, cannot persist state in ${STATE_DIR}: ${err.message}`);
+    log(`panel: FATAL, cannot persist settings in ${STATE_DIR}: ${err.message}`);
     return false;
   }
 }

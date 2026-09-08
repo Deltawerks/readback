@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.3
+
+### Fixed
+
+- **Off now actually means off.** With the toggle showing off, every finished
+  task would still speak, and only cycling the toggle on and off again would
+  silence the current one.
+
+  Two faults stacked. A panel could end up unable to persist settings while
+  still serving normally: it answered requests, showed the toggle in whatever
+  position you left it, and threw every write away, so the file the speaking
+  workers actually read still said voice was on. And the startup self-test added
+  in 0.4.2 to catch exactly this probed `lastSpokenBy`, which is a *runtime*
+  field kept in a different file, so it verified the wrong file entirely and
+  cheerfully started a panel that could not save the voice setting.
+
+  The self-test now probes a settings field, so a panel that cannot save the
+  toggle refuses to start rather than pretending. On top of that, saving the
+  setting is now confirmed against disk before the panel reports success; if it
+  did not persist, the request fails and the page shows the error instead of a
+  toggle that looks like it worked.
+
 ## 0.4.2
 
 ### Fixed
