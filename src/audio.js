@@ -1,94 +1,42 @@
-import { spawn, execFileSync } from 'node:child_process';
-import {
-  writeFileSync,
-  renameSync,
-  readdirSync,
-  rmSync,
-  mkdirSync,
-  unlinkSync,
-  statSync,
-} from 'node:fs';
+import { spawn } from 'node:child_process';
+import { writeFileSync, renameSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR, STREAM_SCRIPT } from './config.js';
 import { readState, writeState, ensureStateDir } from './state.js';
-
-// One empty file per live player, named by its real pid, written when the player
-// spawns and removed when it exits. stopPlayback kills exactly these pids. This
-// is what makes "voice off" reliable: it doesn't depend on a single tracked pid
-// (which goes stale during a queue handoff) or on a WMI command-line lookup
-// (which can miss a process whose command line isn't readable).
-const PLAYERS_DIR = path.join(CACHE_DIR, 'players');
-
-// Kill every streaming player by its command-line signature. The tracked
-// lastPid is not enough on its own: during a queue handoff (one project's reply
-// finishing, the next taking the line) lastPid briefly points at the just-ended
-// player while a new one is starting, so killing lastPid alone let a reply keep
-// talking straight through "voice off". Matching on play-stream.ps1 kills
-// whatever is actually making sound, whichever worker owns it.
-function killAllPlayers() {
-  try {
-    execFileSync(
-      'powershell',
-      [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-Command',
-        "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*play-stream.ps1*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
-      ],
-      { stdio: 'ignore', windowsHide: true, timeout: 5000 }
-    );
-  } catch {
-    // best effort; the fast lastPid kill above has usually handled it already
-  }
-}
+import {
+  PLAYERS_DIR,
+  recordPlayer,
+  forgetPlayer,
+  livePlayers,
+  killPlayers,
+  sweepPlayers,
+} from './players.js';
 
 // Stop playback now. Synchronous, so a following speak() can't spawn a player
-// that overlaps this one.
+// that overlaps this one. Kills every player whose marker is live and whose
+// identity checks out (see players.js), then sweeps by exact command line for
+// any player that never got a marker.
 export function stopPlayback() {
-  // Kill every recorded player by pid. Robust: covers all live players, not just
-  // the last, and doesn't rely on WMI being able to read a command line.
-  let pids = [];
+  const players = livePlayers();
+  killPlayers(players);
+  for (const p of players) forgetPlayer(p.pid);
+  sweepPlayers();
   try {
-    pids = readdirSync(PLAYERS_DIR).filter((f) => /^\d+$/.test(f));
+    writeState({ lastPid: null });
   } catch {
-    // no players dir yet
+    // informational only
   }
-  for (const pid of pids) {
-    const marker = path.join(PLAYERS_DIR, pid);
-    // A marker left behind by a crash or a reboot must never be acted on: pids
-    // get reused, so killing a stale one could terminate an unrelated program.
-    // Nothing plays for ten minutes, so anything older is definitely garbage.
-    let stale = false;
-    try {
-      stale = Date.now() - statSync(marker).mtimeMs > 10 * 60 * 1000;
-    } catch {
-      stale = true;
-    }
-    if (!stale) {
-      try {
-        execFileSync('taskkill', ['/PID', pid, '/T', '/F'], { stdio: 'ignore', windowsHide: true });
-      } catch {
-        // already gone
-      }
-    }
-    try {
-      unlinkSync(path.join(PLAYERS_DIR, pid));
-    } catch {
-      // its own close handler beat us to it
-    }
-  }
-  // Backstop for anything that slipped through (a player whose pid we failed to
-  // record): sweep by command-line signature too.
-  killAllPlayers();
-  writeState({ lastPid: null });
 }
+
+// Stream dirs are named stream-<ms>-<pid>-<n>; only those, never anything else
+// in the cache dir, and never the one being started.
+const STREAM_DIR_RE = /^stream-\d+(?:-\d+){0,2}$/;
 
 function cleanOldStreams(keepDir) {
   try {
     const keep = keepDir ? path.basename(keepDir) : null;
     for (const f of readdirSync(CACHE_DIR)) {
-      if (/^stream-\d+$/.test(f) && f !== keep) {
+      if (STREAM_DIR_RE.test(f) && f !== keep) {
         try {
           rmSync(path.join(CACHE_DIR, f), { recursive: true, force: true });
         } catch {
@@ -101,10 +49,14 @@ function cleanOldStreams(keepDir) {
   }
 }
 
+let streamSeq = 0;
+
 // Fresh per-utterance directory for streamed chunks; stale ones are removed.
+// The pid and a counter keep two utterances started in the same millisecond
+// (by two processes, or by one long-lived panel) from sharing a directory.
 export function newStreamDir() {
   ensureStateDir();
-  const dir = path.join(CACHE_DIR, `stream-${Date.now()}`);
+  const dir = path.join(CACHE_DIR, `stream-${Date.now()}-${process.pid}-${++streamSeq}`);
   mkdirSync(dir, { recursive: true });
   cleanOldStreams(dir);
   return dir;
@@ -115,16 +67,19 @@ export function chunkFile(dir, index) {
 }
 
 // Write a chunk atomically (temp + rename) so the player never reads a
-// half-written file while polling.
+// half-written file while polling. Returns false if the chunk could not be
+// written, so the caller does not count it as delivered.
 export function writeChunk(dir, index, buffer) {
   const dest = chunkFile(dir, index);
   const tmp = `${dest}.part`;
   try {
     writeFileSync(tmp, buffer);
     renameSync(tmp, dest);
+    return true;
   } catch {
     // The stream dir may have been removed by a newer utterance (kill-on-new);
     // that stream is superseded, so a failed write here is harmless.
+    return false;
   }
 }
 
@@ -140,9 +95,10 @@ export function writeEndMarker(dir, count) {
 }
 
 // Spawn the single streaming player for a directory. Hidden console (NOT
-// detached, because on Windows detached gives powershell.exe no console and it silently
-// fails to run). Returns the child; the caller stores its PID and either
-// unref()s it (long-lived parent) or awaits its 'close' (short-lived parent).
+// detached, because on Windows detached gives powershell.exe no console and it
+// silently fails to run). Returns the child; the caller either unref()s it
+// (long-lived parent) or awaits its 'close' (short-lived parent). The player
+// is told where the markers live so it can keep its own marker fresh.
 export function spawnStreamPlayer(dir) {
   const player = spawn(
     'powershell',
@@ -156,23 +112,23 @@ export function spawnStreamPlayer(dir) {
       STREAM_SCRIPT,
       '-Dir',
       dir,
+      '-PlayersDir',
+      PLAYERS_DIR,
     ],
     { stdio: 'ignore', windowsHide: true }
   );
-  // Record this player's pid so any process's stopPlayback can find and kill it,
-  // and clear the record when it exits on its own.
-  const marker = path.join(PLAYERS_DIR, String(player.pid));
   try {
-    mkdirSync(PLAYERS_DIR, { recursive: true });
-    writeFileSync(marker, '');
+    recordPlayer(player.pid);
   } catch {
-    // best effort; killAllPlayers() is the backstop if we couldn't record it
+    // best effort; sweepPlayers() is the backstop if we couldn't record it
   }
   player.on('close', () => {
+    forgetPlayer(player.pid);
+    // lastPid is informational now, but never leave it pointing at a dead pid.
     try {
-      unlinkSync(marker);
+      if (readState().lastPid === player.pid) writeState({ lastPid: null });
     } catch {
-      // already removed by a stopPlayback sweep
+      // nothing depends on it
     }
   });
   return player;

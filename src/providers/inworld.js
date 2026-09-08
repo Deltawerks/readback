@@ -1,4 +1,4 @@
-import { fetchWithTimeout, sleep } from './_http.js';
+import { fetchBody, bodyText, bodyJson, requestWithRetry } from './_http.js';
 
 const TTS_URL = 'https://api.inworld.ai/tts/v1/voice';
 const VOICES_URL = 'https://api.inworld.ai/voices/v1/voices';
@@ -21,47 +21,43 @@ export const knobs = [
 
 export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-1.5-mini', speed: 1.3, temperature: 0.1 };
 
+// Keep a number inside the range the API accepts, and fall back to the default
+// when the panel sends something that is not a number at all.
+function clamp(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 // The key is a pre-base64 string sent as `Authorization: Basic <key>`.
 export async function synthesize(text, cfg, apiKey) {
   if (!apiKey) throw new Error('Inworld API key is not set');
-  const rate = Number(cfg.speed);
   const body = {
     text,
-    voiceId: cfg.voiceId || 'Luna',
-    modelId: cfg.modelId || 'inworld-tts-1.5-max',
+    voiceId: cfg.voiceId || defaults.voiceId,
+    // Must agree with the declared default, or a config block that predates the
+    // model picker quietly buys the model that costs twice as much.
+    modelId: cfg.modelId || defaults.modelId,
     audioConfig: {
       audioEncoding: 'LINEAR16', // = WAV with header
-      speakingRate: Number.isFinite(rate) ? Math.min(1.5, Math.max(0.5, rate)) : 1.0,
+      speakingRate: clamp(cfg.speed, 0.5, 1.5, 1.0),
       sampleRateHertz: 48000,
     },
-    temperature: cfg.temperature ?? 0.1,
+    temperature: clamp(cfg.temperature, 0, 2, defaults.temperature),
   };
 
-  let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const resp = await fetchWithTimeout(
-        TTS_URL,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Basic ${apiKey}` },
-          body: JSON.stringify(body),
-        },
-        20000
-      );
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => '');
-        throw new Error(`Inworld TTS ${resp.status}: ${detail.slice(0, 200)}`);
-      }
-      const data = await resp.json();
-      if (!data.audioContent) throw new Error('Inworld response missing audioContent');
-      return Buffer.from(data.audioContent, 'base64'); // LINEAR16 → WAV bytes
-    } catch (err) {
-      lastErr = err;
-      if (attempt < 2) await sleep(500);
-    }
-  }
-  throw lastErr;
+  const res = await requestWithRetry(
+    TTS_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Basic ${apiKey}` },
+      body: JSON.stringify(body),
+    },
+    { errorFor: (r) => new Error(`Inworld TTS ${r.status}: ${bodyText(r).slice(0, 200)}`) }
+  );
+  const data = bodyJson(res);
+  if (!data || !data.audioContent) throw new Error('Inworld response missing audioContent');
+  return Buffer.from(data.audioContent, 'base64'); // LINEAR16 → WAV bytes
 }
 
 export async function listVoices(apiKey, { filter = 'lang_code = "en"', pageSize = 200 } = {}) {
@@ -71,12 +67,9 @@ export async function listVoices(apiKey, { filter = 'lang_code = "en"', pageSize
   url.searchParams.set('orderBy', 'display_name asc');
   url.searchParams.set('pageSize', String(pageSize));
 
-  const resp = await fetchWithTimeout(url, { headers: { Authorization: `Basic ${apiKey}` } });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    throw new Error(`Inworld voices ${resp.status}: ${detail.slice(0, 200)}`);
-  }
-  const data = await resp.json();
+  const res = await fetchBody(url, { headers: { Authorization: `Basic ${apiKey}` } });
+  if (!res.ok) throw new Error(`Inworld voices ${res.status}: ${bodyText(res).slice(0, 200)}`);
+  const data = bodyJson(res) || {};
   return (data.voices || []).map((v) => ({
     voiceId: v.voiceId,
     displayName: v.displayName || v.voiceId,

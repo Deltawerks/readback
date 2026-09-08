@@ -7,6 +7,7 @@ import { readState, writeState, activeConfig } from '../src/state.js';
 import { currentReply } from '../src/transcript.js';
 import { stripForSpeech, truncateForSpeech } from '../src/tts.js';
 import { speak } from '../src/speak.js';
+import { isClaimed, claim, cleanOldClaims } from '../src/claims.js';
 import { log } from '../src/log.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -27,17 +28,16 @@ async function main() {
 
   let st = readState();
   if (!st.enabled) return;
-  const prevId = st.lastSpokenId;
 
   // The final reply may not be flushed to the transcript at the instant the Stop
   // hook fires, so we'd otherwise read the PREVIOUS turn's reply. Poll until the
   // current turn's reply appears (assistant text after the last user entry) and
-  // it's one we haven't already spoken.
+  // it's one nobody has claimed yet.
   let reply = null;
   const deadline = Date.now() + 6000;
   while (Date.now() < deadline) {
     reply = readReply(transcriptPath);
-    if (reply && reply.id !== prevId) break;
+    if (reply && !isClaimed(reply.id)) break;
     reply = null;
     await sleep(120);
     st = readState();
@@ -49,18 +49,14 @@ async function main() {
     return;
   }
 
-  // Claim this reply. A duplicate hook fire now QUEUES rather than stomping, so
-  // without a claim the same reply could be spoken twice back-to-back. Both
-  // racing workers write their pid; whichever lands last wins, and the other
-  // backs off after a short settle. (60ms is imperceptible and the worker is
-  // detached, so Claude Code is unaffected either way.)
-  writeState({ lastSpokenId: reply.id, lastSpokenBy: process.pid });
-  await sleep(60);
-  const claim = readState();
-  if (claim.lastSpokenId !== reply.id || claim.lastSpokenBy !== process.pid) {
-    log('worker: reply already claimed by another worker, backing off');
+  // Exactly one worker gets to speak a reply. Duplicate hook fires and other
+  // projects' workers all race on the same atomic create; losers exit here.
+  if (!claim(reply.id)) {
+    log('worker: reply already claimed by another worker');
     return;
   }
+  cleanOldClaims();
+  writeState({ lastSpokenId: reply.id, lastSpokenBy: process.pid });
 
   const clean = truncateForSpeech(stripForSpeech(reply.text), st.maxChars);
   if (!clean || clean.length < 2) {
@@ -71,8 +67,14 @@ async function main() {
   // wait:true  keeps this alive until playback finishes, or the player (a non-detached
   //   child) would be torn down when the worker exits.
   // queue:true lines up behind other sessions instead of cutting them off.
-  await speak(clean, st, { wait: true, queue: true });
-  log(`worker: spoke ${clean.length} chars via ${st.provider}/${activeConfig(st).voiceId}`);
+  const result = await speak(clean, st, { wait: true, queue: true });
+  const via = `${st.provider}/${activeConfig(st).voiceId}`;
+  if (result.aborted) {
+    log(`worker: reply not spoken (voice off or stopped while waiting) via ${via}`);
+  } else {
+    const note = result.truncated ? ', cut short by a synthesis error' : '';
+    log(`worker: spoke ${result.spoken} of ${result.total} chunks (${clean.length} chars) via ${via}${note}`);
+  }
 }
 
 main()

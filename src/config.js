@@ -158,15 +158,30 @@ export function getApiKey(provider = 'inworld') {
 }
 
 // Persist a provider's key from the panel (merges, doesn't clobber the other).
-// No-ops for an unknown provider rather than writing a garbage field.
+// No-ops for an unknown provider rather than writing a garbage field. The file
+// is created owner-only: on Windows it inherits the profile's ACL anyway, but
+// on a shared POSIX box the default mode would leave the key world-readable.
 export function setApiKey(provider, key) {
   if (!SECRET_FIELD[provider]) return '';
   const clean = String(key || '').trim();
-  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true });
+  if (!existsSync(STATE_DIR)) mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
   const secret = readSecret();
   secret[SECRET_FIELD[provider]] = clean;
-  writeFileSync(SECRET_FILE, JSON.stringify(secret, null, 2));
+  writeFileSync(SECRET_FILE, JSON.stringify(secret, null, 2), { mode: 0o600 });
   return clean;
+}
+
+// The key saved from the panel, ignoring any environment variable. Lets the
+// panel report what a save actually stored rather than what will be used.
+export function storedApiKey(provider = 'inworld') {
+  return (readSecret()[SECRET_FIELD[normProvider(provider)]] || '').trim();
+}
+
+// True when a real environment variable is overriding whatever the panel saved,
+// so the panel can say that instead of pretending the saved key is in use.
+export function envOverridesKey(provider = 'inworld') {
+  const real = REAL_ENV_KEYS[normProvider(provider)];
+  return Boolean(real && real.trim());
 }
 
 export function hasApiKey(provider = 'inworld') {

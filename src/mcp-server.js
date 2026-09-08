@@ -7,10 +7,10 @@ import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
 import { speak } from './speak.js';
-import { PROVIDER_IDS } from './providers/index.js';
+import { PROVIDER_IDS, getProvider } from './providers/index.js';
 import { log } from './log.js';
 
-const server = new McpServer({ name: 'readback', version: '0.4.4' });
+const server = new McpServer({ name: 'readback', version: '0.5.0' });
 
 function summarize(st) {
   const c = activeConfig(st);
@@ -46,10 +46,24 @@ server.registerTool(
   async () => {
     // Record "off" first, then clear the queue, then kill audio. Stopping first
     // frees the line while voice still reads as on, so the next queued reply
-    // starts talking and "voice off" appears to do nothing.
-    const st = writeState({ enabled: false });
-    flushQueue();
-    stopPlayback();
+    // starts talking and "voice off" appears to do nothing. The silencing runs
+    // whether or not the save succeeds: an unsaved setting is something to
+    // report, not a reason to keep talking.
+    let st;
+    let saveError;
+    try {
+      st = writeState({ enabled: false });
+    } catch (err) {
+      saveError = err;
+    } finally {
+      flushQueue();
+      stopPlayback();
+    }
+    if (saveError) {
+      return fail(
+        `🔇 stopped the audio, but the setting could not be saved (${saveError.message}), so the next reply may still speak. Try voice_off again.`
+      );
+    }
     return text(`🔇 ${summarize(st)}`);
   }
 );
@@ -84,12 +98,18 @@ server.registerTool(
   {
     title: 'Say text now',
     description:
-      'Speak the given text aloud once, right now, regardless of the on/off state. Useful for testing or a one-off announcement.',
-    inputSchema: { text: z.string().describe('The text to speak aloud') },
+      'Speak the given text aloud once, right now. Refuses while voice is off unless force is true; when the user has turned voice off, they mean it.',
+    inputSchema: {
+      text: z.string().describe('The text to speak aloud'),
+      force: z.boolean().optional().describe('Speak even though voice is off. Only when the user explicitly asks for it.'),
+    },
   },
-  async ({ text: input }) => {
+  async ({ text: input, force }) => {
     try {
       const st = readState();
+      if (!st.enabled && !force) {
+        return text('🔇 voice is off, so nothing was spoken. Pass force: true only if the user explicitly wants this said aloud.');
+      }
       const clean = truncateForSpeech(stripForSpeech(input), st.maxChars);
       if (!clean || clean.length < 2) return text('(nothing speakable in that text)');
       await speak(clean, st, { wait: false });
@@ -151,8 +171,14 @@ server.registerTool(
   },
   async ({ speed }) => {
     const st = readState();
-    updateProviderConfig(st.provider, { speed });
-    return text(`speed → ${speed}x (${st.provider})`);
+    // Each provider has its own range (ElevenLabs stops at 1.2). Store what the
+    // provider will actually use, and say so, rather than persisting a number
+    // the panel then displays differently from what plays.
+    const knob = (getProvider(st.provider).knobs || []).find((k) => k.key === 'speed');
+    const clamped = knob ? Math.min(knob.max, Math.max(knob.min, speed)) : speed;
+    updateProviderConfig(st.provider, { speed: clamped });
+    const note = clamped !== speed ? ` (clamped to this provider's range ${knob.min} to ${knob.max})` : '';
+    return text(`speed → ${clamped}x (${st.provider})${note}`);
   }
 );
 

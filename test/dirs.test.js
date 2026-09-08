@@ -155,8 +155,82 @@ test('a toggle that cannot be saved returns an error, not success', async () => 
     mkdirSync(path.join(dir, 'state.json'));
 
     const res = await toggle(false);
-    assert.equal(res.status, 500, 'an unsaved toggle must not report success');
-    assert.match((await res.json()).error, /could not save/i);
+    assert.ok(res.status === 500 || res.status === 503, `an unsaved toggle must not report success (got ${res.status})`);
+    assert.match((await res.json()).error, /could not/i);
+  } finally {
+    panel.kill();
+  }
+});
+
+// Only a real boolean may reach the file. A string "false" is truthy to every
+// worker that reads it, and 0 or null would skip the silencing.
+test('a non-boolean enabled is refused and nothing is written', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-bool-'));
+  const cache = mkdtempSync(path.join(tmpdir(), 'readback-bool-cache-'));
+  const port = await freePort();
+  const panel = spawn(process.execPath, [path.join(ROOT, 'src', 'panel-server.js'), '--no-open'], {
+    stdio: 'ignore',
+    env: { ...process.env, READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: cache, READBACK_PORT: String(port) },
+  });
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const headers = { 'Content-Type': 'application/json', Origin: base, 'Sec-Fetch-Site': 'same-origin' };
+    const post = (body) => fetch(`${base}/api/state`, { method: 'POST', headers, body: JSON.stringify(body) });
+    for (let i = 0; i < 60; i++) {
+      try {
+        if ((await fetch(`${base}/health`)).ok) break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    assert.equal((await post({ enabled: true })).status, 200);
+    const onDisk = () => JSON.parse(readFileSync(path.join(dir, 'state.json'), 'utf8')).enabled;
+    assert.equal(onDisk(), true);
+    for (const bad of ['false', 'off', 0, null, [], {}]) {
+      const r = await post({ enabled: bad });
+      assert.equal(r.status, 400, `enabled=${JSON.stringify(bad)} must be refused`);
+      assert.equal(onDisk(), true, `enabled=${JSON.stringify(bad)} must not reach the file`);
+    }
+    const health = await (await fetch(`${base}/health`)).json();
+    assert.equal(health.readback, true);
+    assert.match(String(health.version), /^\d+\.\d+\.\d+/);
+  } finally {
+    panel.kill();
+  }
+});
+
+// The order that matters most: when "off" cannot be saved, the audio still has
+// to stop. The queue epoch is bumped by the same call that kills playback, so
+// a changed epoch is the observable proof that the silencing ran even though
+// the request failed.
+test('voice off silences even when the setting cannot be saved', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-silence-'));
+  const cache = mkdtempSync(path.join(tmpdir(), 'readback-silence-cache-'));
+  const port = await freePort();
+  const panel = spawn(process.execPath, [path.join(ROOT, 'src', 'panel-server.js'), '--no-open'], {
+    stdio: 'ignore',
+    env: { ...process.env, READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: cache, READBACK_PORT: String(port) },
+  });
+  try {
+    const base = `http://127.0.0.1:${port}`;
+    const headers = { 'Content-Type': 'application/json', Origin: base, 'Sec-Fetch-Site': 'same-origin' };
+    const post = (body) => fetch(`${base}/api/state`, { method: 'POST', headers, body: JSON.stringify(body) });
+    for (let i = 0; i < 60; i++) {
+      try {
+        if ((await fetch(`${base}/health`)).ok) break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    assert.equal((await post({ enabled: true })).status, 200);
+    const epochFile = path.join(cache, 'speak-epoch');
+    const epochBefore = existsSync(epochFile) ? readFileSync(epochFile, 'utf8') : '0';
+    rmSync(path.join(dir, 'state.json'));
+    mkdirSync(path.join(dir, 'state.json'));
+    const r = await post({ enabled: false });
+    assert.notEqual(r.status, 200, 'the failed save must not report success');
+    const epochAfter = existsSync(epochFile) ? readFileSync(epochFile, 'utf8') : '0';
+    assert.notEqual(epochAfter, epochBefore, 'the queue must have been flushed (silencing ran) despite the failed save');
   } finally {
     panel.kill();
   }

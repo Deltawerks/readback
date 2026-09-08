@@ -1,13 +1,21 @@
 node_modules/
 .readback/
 .voicebox/
-.env
+# Every .env variant, so a .env.local or .env.production can't be committed by
+# accident. The checked-in template is the one exception.
+.env*
+!.env.example
 *.log
 .mcp.json
 hooks-snippet.json
 assets/readback.ico
 assets/voicebox.ico
 .claude/launch.json
+# Machine-specific Claude Code settings: holds local paths.
+.claude/settings.local.json
+# API keys, wherever they land, and anything retired in place rather than deleted.
+secret.json
+*.retired
 .env.bak*
 .env.*.bak
 docs/

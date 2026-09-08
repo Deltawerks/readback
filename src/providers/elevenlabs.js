@@ -1,4 +1,4 @@
-import { fetchWithTimeout, sleep, pcmToWav } from './_http.js';
+import { fetchBody, bodyText, bodyJson, requestWithRetry, pcmToWav } from './_http.js';
 
 // Pull ElevenLabs' human-readable message out of its JSON error body, so the
 // panel shows "missing permission voices_read" instead of a bare "HTTP 500".
@@ -16,6 +16,14 @@ function elError(kind, status, detail) {
 const TTS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
 const VOICES_URL = 'https://api.elevenlabs.io/v1/voices'; // account voices (matches AgentLink)
 const OUTPUT_FORMAT = 'pcm_24000'; // raw PCM → wrapped to WAV for the headless player
+
+// Keep a number inside the range the API accepts, and fall back to the default
+// when the panel sends something that is not a number at all.
+function clamp(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
 
 export const label = 'ElevenLabs';
 
@@ -35,8 +43,14 @@ export const knobs = [
 ];
 
 export const defaults = {
-  voiceId: '',
-  modelId: 'eleven_turbo_v2_5',
+  // A real premade voice, not an empty string. The dropdown shows its first
+  // entry either way, so an empty default looked like a chosen voice while every
+  // reply threw "No ElevenLabs voice selected" inside a detached worker: a first
+  // run that is simply silent, with the error nowhere the user can see it.
+  // Xb7hH8MSUJpSbSDYk0k2 is Alice, available on every account.
+  voiceId: 'Xb7hH8MSUJpSbSDYk0k2',
+  // ElevenLabs recommends Flash over Turbo in all use cases, at the same price.
+  modelId: 'eleven_flash_v2_5',
   speed: 1.0,
   stability: 0.5,
   similarity: 0.75,
@@ -48,54 +62,38 @@ export async function synthesize(text, cfg, apiKey) {
   if (!apiKey) throw new Error('ElevenLabs API key is not set');
   if (!cfg.voiceId) throw new Error('No ElevenLabs voice selected');
   const url = `${TTS_BASE}/${encodeURIComponent(cfg.voiceId)}?output_format=${OUTPUT_FORMAT}`;
-  const spd = Number(cfg.speed);
-  const body = {
-    text,
-    model_id: cfg.modelId || 'eleven_turbo_v2_5',
-    voice_settings: {
-      stability: cfg.stability ?? 0.5,
-      similarity_boost: cfg.similarity ?? 0.75,
-      style: cfg.style ?? 0.0,
-      use_speaker_boost: cfg.speakerBoost ?? true,
-      // ElevenLabs accepts ~0.7–1.2; clamp so an out-of-range value can't 400.
-      speed: Number.isFinite(spd) ? Math.min(1.2, Math.max(0.7, spd)) : 1.0,
-    },
-  };
+  const modelId = cfg.modelId || defaults.modelId;
 
-  let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const resp = await fetchWithTimeout(
-        url,
-        {
-          method: 'POST',
-          headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-        20000
-      );
-      if (!resp.ok) {
-        const detail = await resp.text().catch(() => '');
-        throw new Error(elError('TTS', resp.status, detail));
-      }
-      const pcm = Buffer.from(await resp.arrayBuffer());
-      return pcmToWav(pcm, { sampleRate: 24000, channels: 1, bitsPerSample: 16 });
-    } catch (err) {
-      lastErr = err;
-      if (attempt < 2) await sleep(500);
-    }
+  const voiceSettings = {
+    stability: clamp(cfg.stability, 0, 1, defaults.stability),
+    style: clamp(cfg.style, 0, 1, defaults.style),
+  };
+  // ElevenLabs documents speed, similarity and speaker boost as unavailable on
+  // the v3 models, so sending them is noise the model cannot act on.
+  if (!String(modelId).startsWith('eleven_v3')) {
+    voiceSettings.similarity_boost = clamp(cfg.similarity, 0, 1, defaults.similarity);
+    voiceSettings.use_speaker_boost = Boolean(cfg.speakerBoost ?? defaults.speakerBoost);
+    // ElevenLabs accepts roughly 0.7 to 1.2; clamp so an out-of-range value can't 400.
+    voiceSettings.speed = clamp(cfg.speed, 0.7, 1.2, defaults.speed);
   }
-  throw lastErr;
+
+  const res = await requestWithRetry(
+    url,
+    {
+      method: 'POST',
+      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model_id: modelId, voice_settings: voiceSettings }),
+    },
+    { errorFor: (r) => new Error(elError('TTS', r.status, bodyText(r))) }
+  );
+  return pcmToWav(res.body, { sampleRate: 24000, channels: 1, bitsPerSample: 16 });
 }
 
 export async function listVoices(apiKey) {
   if (!apiKey) throw new Error('ElevenLabs API key is not set');
-  const resp = await fetchWithTimeout(VOICES_URL, { headers: { 'xi-api-key': apiKey } });
-  if (!resp.ok) {
-    const detail = await resp.text().catch(() => '');
-    throw new Error(elError('voices', resp.status, detail));
-  }
-  const data = await resp.json();
+  const res = await fetchBody(VOICES_URL, { headers: { 'xi-api-key': apiKey } });
+  if (!res.ok) throw new Error(elError('voices', res.status, bodyText(res)));
+  const data = bodyJson(res) || {};
   return (data.voices || []).map((v) => {
     const labelBits = v.labels ? Object.values(v.labels).filter(Boolean) : [];
     return {

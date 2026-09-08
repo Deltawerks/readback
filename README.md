@@ -24,9 +24,10 @@ phone rings.
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic,
 > Inworld, or ElevenLabs.
 
-**Already using it?** See the [changelog](CHANGELOG.md). 0.4.0 fixes several
-real bugs, including "voice off doesn't stop playback" and a case where the
-panel toggle appeared to work while changing nothing. `git pull` to update.
+**Already using it?** See the [changelog](CHANGELOG.md). 0.5.0 fixes the stop
+path at its root: stale player bookkeeping, concurrent saves, the process sweep,
+and long replies. It ships with regression tests that fail without those fixes.
+If you are on any 0.4.x, `git pull` to update.
 
 ---
 
@@ -60,24 +61,46 @@ npm run register     # writes .mcp.json + hooks-snippet.json for this folder
 
 **1. MCP server** (the in-chat toggle). Auto-loads whenever you work in this
 folder. To get it in *every* project, run the `claude mcp add` line that
-`register` prints.
+`register` prints. That line uses **user scope** (`-s user`), which registers the
+server once for your whole account. It matters: `claude mcp add` defaults to
+local scope, which is only the project folder you ran it in, so without `-s user`
+you get the toggle tools in one folder while the hook goes on speaking in every
+other project.
 
 **2. Auto-speak hook** (the part that actually talks). Open your Claude Code
-settings at `C:\Users\<you>\.claude\settings.json` and add the `hooks` block from
-the `hooks-snippet.json` that `register` just wrote. If that settings file
-doesn't exist yet, paste the snippet in as the whole file. If it does exist, add
-`"hooks"` alongside whatever is already in there:
+settings at `C:\Users\<you>\.claude\settings.json`. What you do next depends on
+what is already in that file.
+
+*No settings file yet:* paste in the whole `hooks-snippet.json` that `register`
+just wrote, as the entire file.
+
+*A settings file with no `hooks` key:* add the snippet's `"hooks"` block as one
+more top-level key, next to your existing settings.
+
+*A settings file that already has a `hooks` key:* keep that key and put the
+snippet's `"Stop"` entry **inside** it, alongside the hooks you already have:
 
 ```json
 {
   "yourExistingSettings": "stay exactly as they are",
   "hooks": {
+    "PreToolUse": [
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node", "args": ["C:\\your\\existing\\hook.js"] } ] }
+    ],
     "Stop": [
       { "hooks": [ { "type": "command", "command": "node", "args": ["C:\\path\\to\\readback\\hook\\stop-hook.js"], "timeout": 15 } ] }
     ]
   }
 }
 ```
+
+> **Never paste a second `"hooks"` key.** An object with the same key twice is
+> still valid JSON, and the parser keeps the last one, so every hook you had
+> before is dropped, silently, with no error anywhere.
+
+If you already have a `"Stop"` array of your own, the same rule applies one level
+down: add Readback's `{ "hooks": [ ... ] }` entry to that existing array instead
+of adding a second `"Stop"` key.
 
 Use the path from *your* generated snippet, not the one above. Then **restart
 Claude Code**, say "voice on", and the next reply should speak.
@@ -113,6 +136,10 @@ you want to switch voice, provider or speed, then close it again.
 - In the panel: switch provider, pick a voice, drag speed / expression, hit ▶ to
   preview. The panel's Speak/preview takes over immediately (it's you, at the
   keyboard); only the automatic per-reply speech queues.
+- Voice off means off. The MCP `say` tool now refuses while voice is off, unless
+  it is called with `force: true`, so Claude can't decide to talk over a mute you
+  just pressed. The panel's Speak and preview buttons are unaffected: that is you
+  at the keyboard, asking for it.
 
 Keys are stored per-user **outside the repo**: `%APPDATA%\Readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
@@ -156,11 +183,17 @@ acts as a backstop rather than clipping normal replies. Set
   HTTPS, and nowhere else. Readback has no servers, no telemetry, no analytics,
   and no update check.
 - **It costs money per character spoken.** Readback defaults to the cheapest
-  sensible model (Inworld `tts-1.5-mini`, $5 per million characters; `max` is
-  double that for a bit more richness). Worth knowing: if you add the hook to
-  your global `settings.json`, it speaks in *every* project where voice is on,
-  which adds up faster than you'd guess. Keep it per-project, or toggle voice
-  off when you're not listening.
+  sensible model, Inworld `tts-1.5-mini`, at $0.005 per 1,000 characters ($5 per
+  million); `max` is double that for a bit more richness. **ElevenLabs costs 10
+  to 20 times as much**: $0.05 per 1,000 characters on Flash and Turbo, $0.10 on
+  `eleven_v3` and `eleven_multilingual_v2`. At the default 12,000 character cap,
+  one long reply is about 6 cents on Inworld mini and $0.60 to $1.20 on
+  ElevenLabs. If you run ElevenLabs, set `READBACK_MAX_CHARS` to something
+  shorter so a wall of text can't run up a dollar on its own. The panel shows the
+  rate for the model you have selected. Worth knowing either way: if you add the
+  hook to your global `settings.json`, it speaks in *every* project where voice
+  is on, which adds up faster than you'd guess. Keep it per-project, or toggle
+  voice off when you're not listening.
 - Trouble? Check `readback.log` in `%LOCALAPPDATA%\Readback` on Windows
   (throwaway data is kept out of the roaming profile), or alongside the state dir
   otherwise.

@@ -1,5 +1,116 @@
 # Changelog
 
+## 0.5.0
+
+The stop button is fixed at the root this time, and the fixes ship with tests
+that fail without them. If you are on any 0.4.x, update. A full adversarial
+review (five passes over the whole tool) turned up the causes below; the ones
+that made voice keep talking are first.
+
+### Fixed
+
+- **The recurring "it works, then one day it just stops" bug.** After a normal
+  reply finished, a leftover process id was never cleared, and the check for
+  "is something still playing" trusted that id with no expiry. As soon as
+  Windows handed that number to any long-running program, every later reply
+  waited forever for a player that had ended hours ago, and only cycling the
+  toggle cleared it. Players now announce themselves in their own files and keep
+  them fresh while they run, so "still playing" means a process that is actually
+  playing right now, not a remembered number.
+
+- **Voice off could error out with the audio still going.** Two Readback
+  processes saving at the same moment (the panel and a hook, say) collided on
+  the file rename Windows would not allow, and under load that failed on nearly
+  half of all writes. The save is now retried through that transient refusal,
+  and, just as important, turning voice off stops the audio and clears the queue
+  whether or not the save succeeds. An unsaved setting is something to report,
+  never a reason to keep talking.
+
+- **"Stop" could kill the wrong thing and miss the right one.** The sweep that
+  backed up the stop matched any program whose command line merely mentioned the
+  player script, so an open editor or shell could be terminated, and it matched
+  its own command, which cut the sweep off half finished so players enumerated
+  after it survived. It now targets only real player processes started by this
+  install, confirmed by their recorded start time, and never itself.
+
+- **A reply longer than ten minutes used to be unstoppable.** The old stop gave
+  up on any player more than ten minutes old, measured from when it started, and
+  then deleted the record so nothing could reach it again. Liveness is now based
+  on the player still running, not its age, so a long read stops like any other.
+
+- **Turning voice off now stops paying for the rest of the reply.** A reply is
+  synthesized sentence by sentence. Voice off stopped the audio but the
+  background synthesis kept calling the provider for every remaining sentence.
+  It now checks after each sentence and stops synthesizing the moment the line
+  is pulled.
+
+- **Two projects finishing at the same instant no longer drop a reply, and a
+  doubled hook fire no longer speaks one twice.** The "who speaks this reply"
+  claim was a single shared slot with a brief settle; two replies landing close
+  together fought over it. Each reply is now claimed by an atomic file create,
+  which exactly one worker can win.
+
+- **A save that cannot be written is reported, not swallowed.** `enabled` is only
+  ever the real value true or false now, so a stray string or number from
+  another client can no longer read as "on" to the workers while the panel shows
+  off. A non-boolean is refused. A settings file that is briefly unreadable
+  (an antivirus or backup holding it) is treated as "unknown, try again", not as
+  corruption to reset over, which is what silently wiped saved settings before.
+  A genuinely corrupt file is kept aside before defaults take over.
+
+- **A truncated reply no longer passes for the whole thing.** If a sentence fails
+  mid-reply, Readback says "the rest is on screen" out loud and the log records
+  how many sentences of how many were actually spoken, instead of logging a full
+  success over a reply that was cut short.
+
+- **A stalled provider response can no longer hang a worker forever.** The
+  request timeout now covers the whole download, not just the initial
+  connection, and the retry only repeats failures worth repeating (network
+  errors, rate limits, server errors), never a bad key and never a request that
+  was already aborted, which on ElevenLabs could otherwise be billed more than
+  once.
+
+- **The panel no longer freezes on a long read.** A wall of dashes or spaces in a
+  reply hit a pathological regex that could pin the CPU for minutes on the very
+  path that runs on every reply. Fixed, and input is capped before it reaches it.
+
+- **The control panel keeps its own state honest.** A hung server now trips the
+  NOT CONNECTED banner instead of showing a confident wrong toggle; the poll no
+  longer rebuilds the dropdowns and sliders under your cursor mid-drag; a stale
+  read can no longer overwrite a newer toggle; and a value the provider will
+  reject shows the default rather than NaN.
+
+- **Speech reads better.** Wrapped prose is no longer read with a full stop at
+  every line break, and `snake_case` identifiers keep their underscores instead
+  of being run together.
+
+### Changed
+
+- **Voice off means off, even to the tools.** The MCP `say` tool now refuses
+  while voice is off unless it is called with `force: true`, so an assistant
+  cannot decide to talk over a mute you just pressed. The panel's Speak and
+  preview buttons are unaffected: that is you at the keyboard.
+
+- **ElevenLabs defaults that actually work on the first try.** It ships with a
+  real default voice (so a first run is not silent), defaults to a current Flash
+  model rather than a deprecated Turbo one, and stops sending the tuning fields
+  the newest model does not accept. The panel and README now show the
+  per-character cost next to the provider, since ElevenLabs runs ten to twenty
+  times the price of Inworld's default.
+
+- **Overriding `READBACK_STATE_DIR` no longer splits the app.** The cache
+  directory has its own override, `READBACK_CACHE_DIR`, and every Readback
+  process resolves both the same way; `npm run where` prints them and `/health`
+  reports them, so a mismatch is one command to see. (Carried from 0.4.4.)
+
+### Docs and packaging
+
+- The install steps no longer tell you to paste a second `hooks` key, which is
+  valid JSON that silently drops every hook you already had; the MCP line now
+  registers at user scope so the tools exist in every project, matching the hook.
+- `.gitignore` now covers `.env*`, `secret.json`, `.claude/settings.local.json`
+  and retired files; the sample env file shows the real default cap.
+
 ## 0.4.4
 
 Voice off has been unreliable for several releases now, and each fix landed on a

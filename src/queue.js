@@ -14,7 +14,10 @@ import {
 } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR } from './config.js';
-import { readState } from './state.js';
+import { pidAlive, anyPlayerAlive } from './players.js';
+import { log } from './log.js';
+
+export { pidAlive };
 
 export const QUEUE_DIR = path.join(CACHE_DIR, 'speak-queue');
 const EPOCH_FILE = path.join(CACHE_DIR, 'speak-epoch');
@@ -23,19 +26,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function ensureQueueDir() {
   if (!existsSync(QUEUE_DIR)) mkdirSync(QUEUE_DIR, { recursive: true });
-}
-
-// True if a process with this pid is currently running (same user). Signal 0
-// tests existence without actually signalling; EPERM means it exists but isn't
-// ours to touch (still "alive" for our purposes).
-export function pidAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return err.code === 'EPERM';
-  }
 }
 
 // The current "epoch". A hard stop (voice off / stop button / a manual utterance
@@ -61,11 +51,19 @@ export function flushQueue() {
   }
 }
 
+let ticketSeq = 0;
+
 // Join the line. Returns a ticket for waitTurn / releaseTicket.
 export function enqueue() {
   ensureQueueDir();
   // Zero-padded so a plain lexicographic filename sort is chronological (FIFO).
-  const seq = `${String(Date.now()).padStart(15, '0')}-${String(process.pid).padStart(7, '0')}`;
+  // The counter keeps two tickets from one long-lived process in the same
+  // millisecond (a double-click on the panel's Speak) from sharing a file.
+  const seq = [
+    String(Date.now()).padStart(15, '0'),
+    String(process.pid).padStart(7, '0'),
+    String(++ticketSeq).padStart(4, '0'),
+  ].join('-');
   const name = `${seq}.json`;
   const file = path.join(QUEUE_DIR, name);
   try {
@@ -88,7 +86,7 @@ export function releaseTicket(ticket) {
 // Drop tickets whose owning process has died, so a crashed or killed session
 // can never wedge the queue behind it.
 // No utterance legitimately holds the line this long. Past it a ticket is
-// treated as abandoned regardless of what its pid looks like — pids are reused,
+// treated as abandoned regardless of what its pid looks like: pids are reused,
 // especially across a reboot, so "its pid is alive" can be a different program
 // entirely. Without this, one leftover ticket silently blocks every reply
 // forever and voice just stops working the next day.
@@ -140,21 +138,27 @@ export function isFront(ticket) {
   return files[0] === ticket.name;
 }
 
-// A player from the previous utterance may still be draining its final chunk.
-function activePlayerAlive() {
-  return pidAlive(readState().lastPid);
-}
+// Nothing legitimately waits this long. Past it, something is wrong with the
+// bookkeeping and giving up (logged) beats a worker polling forever.
+const MAX_WAIT_MS = 20 * 60 * 1000;
 
 // Block until it's our turn (oldest ticket, nothing still playing) or until we
 // should give up. Returns true = go now, false = aborted (caller releases the
 // ticket). The common single-session case returns true on the first pass with
 // no sleep, so there is zero added latency when nothing else is talking.
-export async function waitTurn(ticket, myEpoch, { stillWanted, pollMs = 120 } = {}) {
+// "Nothing still playing" is decided by the player markers, which the players
+// keep fresh themselves, not by a remembered pid that can go stale or be reused.
+export async function waitTurn(ticket, myEpoch, { stillWanted, pollMs = 120, maxWaitMs = MAX_WAIT_MS } = {}) {
+  const giveUpAt = Date.now() + maxWaitMs;
   for (;;) {
     if (currentEpoch() !== myEpoch) return false; // a stop / flush happened
     if (stillWanted && !stillWanted()) return false; // e.g. voice toggled off
     cleanStale();
-    if (isFront(ticket) && !activePlayerAlive()) return true;
+    if (isFront(ticket) && !anyPlayerAlive()) return true;
+    if (Date.now() > giveUpAt) {
+      log('queue: gave up waiting for the line after 20 minutes');
+      return false;
+    }
     await sleep(pollMs);
   }
 }

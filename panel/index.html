@@ -91,6 +91,8 @@
   input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 4px; background: var(--blue); cursor: pointer; box-shadow: 0 0 10px rgba(51,120,246,.7); border: 1px solid var(--cyan); }
   input[type="range"]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 4px; background: var(--blue); cursor: pointer; border: 1px solid var(--cyan); box-shadow: 0 0 10px rgba(51,120,246,.7); }
   .hint { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin: -6px 0 12px 106px; }
+  .cost { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin: -12px 0 14px; }
+  .cost:empty { display: none; }
   .switch-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .switch-row .lbl2 { font-family: var(--body); font-size: 12px; color: var(--muted); letter-spacing: .3px; }
   .toggle.sm { --w: 48px; --h: 26px; }
@@ -98,6 +100,7 @@
   .toggle.sm[aria-checked="true"] .knob { left: calc(var(--w) - 21px); }
   .keyState { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin-top: 8px; display: flex; align-items: center; gap: 6px; }
   .keyState.ok { color: var(--good); }
+  .keyState:empty { display: none; }
   .foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; font-family: var(--body); font-size: 11.5px; color: var(--muted); }
   .dot { width: 8px; height: 8px; border-radius: 2px; background: var(--dim); box-shadow: 0 0 8px currentColor; }
   .dot.on { background: var(--good); color: var(--good); }
@@ -142,6 +145,7 @@
 
     <label class="lbl" for="model">Model</label>
     <div class="mb"><select id="model"></select></div>
+    <div id="cost" class="cost"></div>
 
     <div id="tuning"></div>
 
@@ -161,6 +165,7 @@
       <button id="saveKey" class="btn">Save</button>
     </div>
     <div class="keyState" id="keyState">checking…</div>
+    <div class="keyState" id="keyEnv"></div>
 
     <div class="foot">
       <span id="dot" class="dot off"></span>
@@ -173,6 +178,9 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let state = {}, meta = {}, keys = {}, voiceList = [];
+// What the last full render actually drew, so the poll can tell a real change
+// from a repaint that would only disturb a control in use.
+let drawn = { provider: null, modelId: null };
 const prov = () => state.provider;
 const cfg = () => state[state.provider] || {};
 
@@ -181,8 +189,32 @@ function toast(msg, isErr) {
   t.textContent = msg; t.className = 'toast show' + (isErr ? ' err' : '');
   clearTimeout(toast._t); toast._t = setTimeout(() => (t.className = 'toast'), 2600);
 }
-async function api(path, opts) {
-  const res = await fetch(path, opts);
+// Every request gets a deadline. A server that accepts the connection and then
+// never answers used to leave this page sitting on a confident "voice on"
+// forever, which is the same lie as a dead toggle: you go hunting for a bug in
+// the hook when the panel simply stopped answering. A stalled request now fails
+// like an unreachable one and lands on NOT CONNECTED.
+const REQUEST_TIMEOUT_MS = 2500;
+// The provider-backed routes call out to Inworld / ElevenLabs before they can
+// answer, so they get a real network budget instead of the panel deadline.
+const SLOW_TIMEOUT_MS = 30000;
+function deadline(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+async function api(path, opts, timeoutMs) {
+  const ms = timeoutMs || REQUEST_TIMEOUT_MS;
+  let res;
+  try {
+    res = await fetch(path, { ...(opts || {}), signal: deadline(ms) });
+  } catch (e) {
+    // "TimeoutError: signal timed out" in the status line is jargon. Say what
+    // actually happened.
+    const stalled = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+    throw new Error(stalled ? 'no answer in ' + (ms / 1000) + 's' : ((e && e.message) || 'request failed'));
+  }
   if (!res.ok) {
     let detail = '';
     try { const j = await res.json(); detail = j.error || j.reason || ''; } catch {}
@@ -190,11 +222,43 @@ async function api(path, opts) {
   }
   return res.json();
 }
-function absorb(s) { meta = s.providers || meta; keys = s.keys || keys; delete s.providers; delete s.keys; state = s; }
+
+// Request sequencing. Every request takes a ticket before it leaves; a reply
+// carrying an older ticket than the last one applied is dropped. Without this a
+// slow GET that started before a toggle POST can land after it and repaint the
+// switch with the state from before the click.
+let ticket = 0, appliedTicket = 0;
+const nextTicket = () => ++ticket;
+// Held while a write is waiting for its answer. The write's reply is the newer
+// truth, so the poll stands down rather than racing it.
+let writesInFlight = 0;
+
+// GET /api/state does not carry envOverride, so a plain merge would blink the
+// warning out three seconds after /api/key set it.
+function mergeKeys(incoming) {
+  if (!incoming) return keys;
+  const out = {};
+  for (const [id, v] of Object.entries(incoming)) {
+    const prev = keys[id] || {};
+    out[id] = 'envOverride' in v ? { ...v } : { ...v, envOverride: !!prev.envOverride };
+  }
+  return out;
+}
+function absorb(s, t) {
+  if (t !== undefined && t <= appliedTicket) return false;
+  if (t !== undefined) appliedTicket = t;
+  meta = s.providers || meta;
+  keys = mergeKeys(s.keys);
+  delete s.providers; delete s.keys;
+  state = s;
+  return true;
+}
 
 async function patchTop(body) {
+  const t = nextTicket();
+  writesInFlight++;
   try {
-    absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }));
+    absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), t);
     syncError = '';
     return true;
   } catch (e) {
@@ -203,21 +267,40 @@ async function patchTop(body) {
     syncError = e.message;
     toast('Could not save: ' + e.message, true);
     return false;
+  } finally {
+    writesInFlight--;
   }
 }
 async function patchConfig(config) {
-  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) })); }
+  const t = nextTicket();
+  writesInFlight++;
+  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) }), t); }
   catch (e) { toast('Could not save: ' + e.message, true); }
+  finally { writesInFlight--; }
 }
 
+// The buttons themselves depend only on the provider list, which never changes
+// while the page is open, so they are built once. The poll then only marks which
+// one is active, and can't yank a control out from under the pointer.
 function renderProviders() {
-  const seg = $('providerSeg'); seg.innerHTML = '';
-  for (const [id, m] of Object.entries(meta)) {
-    const b = document.createElement('button');
-    b.textContent = m.label;
-    if (id === prov()) b.classList.add('active');
-    b.addEventListener('click', () => switchProvider(id));
-    seg.appendChild(b);
+  const seg = $('providerSeg');
+  const ids = Object.keys(meta).join(',');
+  if (seg.dataset.built !== ids) {
+    seg.innerHTML = '';
+    for (const [id, m] of Object.entries(meta)) {
+      const b = document.createElement('button');
+      b.textContent = m.label;
+      b.dataset.provider = id;
+      b.addEventListener('click', () => switchProvider(id));
+      seg.appendChild(b);
+    }
+    seg.dataset.built = ids;
+  }
+  markActiveProvider();
+}
+function markActiveProvider() {
+  for (const b of $('providerSeg').querySelectorAll('button')) {
+    b.classList.toggle('active', b.dataset.provider === prov());
   }
 }
 async function switchProvider(id) {
@@ -232,6 +315,39 @@ function renderModels() {
   const add = (id, label) => { if (have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().modelId) o.selected = true; sel.appendChild(o); };
   if (cfg().modelId && !models.some((m) => m.id === cfg().modelId)) add(cfg().modelId, cfg().modelId);
   for (const m of models) add(m.id, m.label);
+  drawn.modelId = cfg().modelId;
+  renderCost();
+}
+// Published list price per 1,000 characters. ElevenLabs is 10 to 20 times
+// Inworld's mini, which is worth seeing before you pick, not after the bill. A
+// model with no verified rate shows nothing rather than a guess.
+const COST_PER_1K = {
+  inworld: { 'inworld-tts-1.5-mini': '$0.005', 'inworld-tts-1.5-max': '$0.01' },
+  elevenlabs: {
+    eleven_flash_v2_5: '$0.05',
+    eleven_turbo_v2_5: '$0.05',
+    eleven_v3: '$0.10',
+    eleven_multilingual_v2: '$0.10',
+  },
+};
+function renderCost() {
+  const price = (COST_PER_1K[prov()] || {})[cfg().modelId] || '';
+  $('cost').textContent = price ? 'About ' + price + ' per 1,000 characters spoken.' : '';
+}
+// A stored value that isn't a finite number (a hand-edited state file, a value
+// left over from an older build) used to print NaN in the readout and leave the
+// slider parked at whatever the browser made of it. Fall back to the provider's
+// own default for that knob, and never show a value outside the track you can
+// actually drag.
+function knobValue(k) {
+  const defaults = (meta[prov()] && meta[prov()].defaults) || {};
+  const stored = Number(cfg()[k.key]);
+  const fallback = Number(defaults[k.key]);
+  let v = Number.isFinite(stored) ? stored : (Number.isFinite(fallback) ? fallback : Number(k.min));
+  const lo = Number(k.min), hi = Number(k.max);
+  if (Number.isFinite(lo)) v = Math.max(lo, v);
+  if (Number.isFinite(hi)) v = Math.min(hi, v);
+  return Number.isFinite(v) ? v : 0;
 }
 function renderTuning() {
   const box = $('tuning'); box.innerHTML = '';
@@ -249,7 +365,7 @@ function renderTuning() {
     const row = document.createElement('div'); row.className = 'slider';
     const label = document.createElement('span'); label.className = 'lbl2'; label.textContent = k.label;
     const input = document.createElement('input'); input.type = 'range'; input.min = k.min; input.max = k.max; input.step = k.step;
-    const val = cfg()[k.key] != null ? cfg()[k.key] : k.min; input.value = val;
+    const val = knobValue(k); input.value = val;
     const out = document.createElement('output');
     const fmt = (v) => Number(v).toFixed(k.step < 1 ? (k.step < 0.1 ? 2 : 1) : 0) + (k.suffix || '');
     out.textContent = fmt(val);
@@ -260,12 +376,21 @@ function renderTuning() {
   }
 }
 function renderKey() {
-  const m = meta[prov()] || {}; const k = keys[prov()] || {};
+  const m = meta[prov()] || {};
   $('keyLabel').textContent = (m.label || '') + ' API key';
   $('apiKey').value = '';
+  renderKeyState();
+}
+// The indicator on its own. This is the half the poll is allowed to redraw:
+// clearing the input every three seconds would wipe a key mid-paste.
+function renderKeyState() {
+  const m = meta[prov()] || {}; const k = keys[prov()] || {};
   const el = $('keyState');
   if (k.hasKey) { el.className = 'keyState ok'; el.textContent = 'key saved · ' + (k.hint || 'set'); }
   else { el.className = 'keyState'; el.textContent = 'no ' + (m.label || '') + ' key yet. Paste it above and hit Save'; }
+  // A saved key that is being ignored looks exactly like a saved key that works,
+  // right up until you wonder why editing it changes nothing.
+  $('keyEnv').textContent = k.envOverride ? 'an environment variable is overriding the saved key' : '';
 }
 function voiceName() {
   const v = voiceList.find((x) => x.voiceId === cfg().voiceId);
@@ -297,28 +422,52 @@ function fillVoices(voices) {
   const sel = $('voice'); sel.innerHTML = '';
   const have = new Set();
   const add = (id, label) => { if (!id || have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().voiceId) o.selected = true; sel.appendChild(o); };
-  for (const v of voices) {
+  for (const v of voiceList) {
     const name = v.displayName || v.voiceId;
     const desc = v.description ? ' - ' + v.description : '';
     add(v.voiceId, name + desc + (v.gender ? ' (' + v.gender + ')' : ''));
   }
   if (cfg().voiceId && !have.has(cfg().voiceId)) add(cfg().voiceId, cfg().voiceId + ' (current)');
-  if (!sel.options.length) sel.innerHTML = '<option value="">(add a key to load voices)</option>';
+  if (!have.size) { sel.innerHTML = '<option value="">(add a key to load voices)</option>'; return; }
+  // ElevenLabs ships with no voice set. With nothing marked selected the browser
+  // shows the first voice as if it were chosen, so the panel reads as configured
+  // while every reply throws "no voice selected" inside a detached worker. Say
+  // that nothing is picked instead.
+  if (!cfg().voiceId) {
+    const o = document.createElement('option');
+    o.value = ''; o.textContent = '(choose a voice)';
+    o.disabled = true; o.selected = true; o.dataset.placeholder = '1';
+    sel.insertBefore(o, sel.firstChild);
+    sel.selectedIndex = 0;
+  }
 }
 async function loadVoices() {
   if (!(keys[prov()] && keys[prov()].hasKey)) { fillVoices([]); renderStatus(); return; }
-  try { const { voices } = await api('/api/voices'); fillVoices(voices || []); }
+  // Goes out to the provider, so it gets a network budget, not the panel deadline.
+  try { const { voices } = await api('/api/voices', undefined, SLOW_TIMEOUT_MS); fillVoices(voices || []); }
   catch (e) { fillVoices([]); toast('Could not load voices: ' + e.message, true); }
   renderStatus();
 }
-// Everything redrawable from state alone. Deliberately excludes loadVoices():
+// The full redraw: every control, rebuilt from state. Only for a user action or
+// a provider change, never for the poll. Deliberately excludes loadVoices():
 // that one calls the provider API, so it must not run on every refresh.
 function renderLocal() {
   renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus();
+  drawn.provider = prov();
 }
 async function renderAll() {
   renderLocal();
   await loadVoices();
+}
+// The poll's redraw. It touches the status line, the toggle, which provider
+// reads as active and the key indicator, and nothing else. Rebuilding the model
+// list, the voice list or the sliders here is what killed a drag that lasted
+// longer than three seconds: the input was replaced under the cursor mid-drag.
+// Those are rebuilt only when the provider or the model actually changed.
+function renderPoll() {
+  if (drawn.provider !== prov()) { renderAll(); return; }
+  if (drawn.modelId !== cfg().modelId) renderModels();
+  markActiveProvider(); renderKeyState(); renderStatus();
 }
 
 // The panel used to read state once at load and never again, so anything that
@@ -326,13 +475,19 @@ async function renderAll() {
 // this page showing a stale toggle: it would say ON while voice was actually
 // off. Re-read whenever the tab is looked at, so the toggle can't lie.
 async function refreshState() {
+  // A save is waiting for its answer. That answer is the newer truth, so don't
+  // race it with a read that started from the state before the click.
+  if (writesInFlight) return;
+  const t = nextTicket();
   try {
-    absorb(await api('/api/state'));
+    const fresh = await api('/api/state');
+    if (!absorb(fresh, t)) return;   // something newer already landed
     syncError = '';
-    renderLocal();
+    renderPoll();
   } catch (e) {
-    // Server unreachable. Surface it instead of silently keeping a stale
-    // display, which is what made a dead toggle look like a working one.
+    // Server unreachable, or accepting connections and never answering. Surface
+    // it instead of silently keeping a stale display, which is what made a dead
+    // toggle look like a working one.
     syncError = e.message;
     renderStatus();
   }
@@ -344,13 +499,14 @@ async function saveKey() {
   try {
     const r = await api('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov(), apiKey: key }) });
     $('apiKey').value = '';
-    keys[prov()] = { hasKey: r.hasKey, hint: r.keyHint };
+    keys[prov()] = { hasKey: r.hasKey, hint: r.keyHint, envOverride: !!r.envOverride };
     renderKey(); toast('Key saved');
     await loadVoices();
   } catch (e) { toast('Could not save key: ' + e.message, true); }
 }
 async function say(text) {
-  try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+  // Synthesizes the first chunk before it answers, so it gets the long budget.
+  try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }, SLOW_TIMEOUT_MS);
     // Preview deliberately works while muted, which is confusing on its own: a
     // successful test says nothing about whether replies will actually speak.
     // Say so, rather than letting it read as "everything is fine".
@@ -369,26 +525,48 @@ $('toggle').addEventListener('click', async () => {
   }
   renderStatus();
 });
-$('voice').addEventListener('change', (e) => { patchConfig({ voiceId: e.target.value }); state[prov()].voiceId = e.target.value; renderStatus(); });
-$('model').addEventListener('change', (e) => { patchConfig({ modelId: e.target.value }); });
+$('voice').addEventListener('change', (e) => {
+  patchConfig({ voiceId: e.target.value });
+  state[prov()].voiceId = e.target.value;
+  const ph = $('voice').querySelector('option[data-placeholder]');
+  if (ph) ph.remove();                               // a voice is picked now
+  renderStatus();
+});
+$('model').addEventListener('change', (e) => {
+  patchConfig({ modelId: e.target.value });
+  state[prov()].modelId = e.target.value;
+  drawn.modelId = e.target.value;                    // the poll needn't rebuild
+  renderCost();
+});
 $('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
 $('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });
 $('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('speak').click(); });
-$('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }); toast('Stopped'); } catch (e) {} });
+$('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }, SLOW_TIMEOUT_MS); toast('Stopped'); } catch (e) {} });
 $('saveKey').addEventListener('click', saveKey);
 $('apiKey').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveKey(); });
 window.addEventListener('focus', refreshState);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) refreshState(); });
 
 // Poll lightly so the toggle stays truthful even on a screen that never loses
-// focus (an always-open dashboard). Only the status line + toggle are redrawn,
-// never the dropdowns, so it can't disturb a selection in progress. This is what
-// stops the panel from ever displaying "on" while voice is actually off.
+// focus (an always-open dashboard). The poll redraws the status line, the
+// toggle, the active provider and the key indicator. The model and voice
+// dropdowns and the tuning sliders are rebuilt only when the provider or the
+// model actually changed, so a slider drag or an open dropdown survives it. The
+// poll also stands down while a save is in flight, and a reply that arrives out
+// of order is discarded. This is what stops the panel from ever displaying "on"
+// while voice is actually off.
 setInterval(refreshState, 3000);
 
 (async function init() {
-  try { const s = await api('/api/state'); absorb(s); }
-  catch (e) { $('status').textContent = 'panel offline'; toast('Cannot reach the Readback server', true); return; }
+  const t = nextTicket();
+  try { absorb(await api('/api/state'), t); }
+  catch (e) {
+    // Same honest failure as a mid-session outage: NOT CONNECTED, with the
+    // reason, instead of a toggle the page cannot back up.
+    syncError = e.message; renderStatus();
+    toast('Cannot reach the Readback server', true);
+    return;
+  }
   await renderAll();
 })();
 </script>
