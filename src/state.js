@@ -6,6 +6,7 @@ import {
   mkdirSync,
   existsSync,
   unlinkSync,
+  statSync,
 } from 'node:fs';
 import path from 'node:path';
 import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS } from './config.js';
@@ -112,6 +113,76 @@ function writeAtomic(obj, file = STATE_FILE) {
       }
       pause(delay);
       delay = Math.min(delay * 2, 50);
+    }
+  }
+}
+
+// Cross-process mutual exclusion for the settings file.
+//
+// Every settings write is a read, a merge and a write. Without a lock, two
+// writers that overlap each merge what they read BEFORE the other one wrote,
+// and the loser's change is put back. That is how changing a slider or a voice
+// could resurrect `enabled`: the config write carried the value from before the
+// toggle and wrote it back on top, turning voice on again a moment after it was
+// turned off, while the panel went on showing off because its own request
+// sequencing discarded that stale reply. Creating the lock with the wx flag
+// either succeeds for exactly one process or fails with EEXIST for every other.
+const LOCK_FILE = `${STATE_FILE}.lock`;
+// Long enough that no honest write is still holding it, short enough that a
+// process killed mid-write cannot block settings for long.
+const LOCK_STALE_MS = 10 * 1000;
+// A settings write holds the lock for about a millisecond, so any honest wait is
+// short. This budget only has to cover a pile-up, and going over it means
+// something is wrong rather than busy.
+const LOCK_WAIT_MS = 5000;
+// Windows fires timers about every 15.6ms, so there is no such thing as a 1ms
+// sleep here: a waiter that sleeps at all gives the lock back to whoever is
+// looping tightest. Spin through the window a normal hold occupies before
+// yielding, measured rather than guessed (a write is about 1.5ms end to end).
+const SPIN_MS = 20;
+
+// Exported so the tests can prove it actually serializes. Nothing outside this
+// module should need it: every settings write already goes through writeState.
+export function withSettingsLock(fn) {
+  let held = false;
+  const giveUpAt = Date.now() + LOCK_WAIT_MS;
+  const spinUntil = Date.now() + SPIN_MS;
+  for (;;) {
+    try {
+      writeFileSync(LOCK_FILE, String(process.pid), { flag: 'wx' });
+      held = true;
+      break;
+    } catch (err) {
+      if (err.code !== 'EEXIST') break; // cannot lock here at all; write anyway
+      try {
+        if (Date.now() - statSync(LOCK_FILE).mtimeMs > LOCK_STALE_MS) unlinkSync(LOCK_FILE);
+      } catch {
+        // someone else broke or released it first
+      }
+      if (Date.now() >= giveUpAt) break;
+      // Spin first: the holder is about to be done, and sleeping here is what
+      // starved this writer into giving up and writing without the lock, which
+      // is how the voice-off got clobbered. Only yield once the wait has gone on
+      // longer than any honest hold.
+      if (Date.now() < spinUntil) continue;
+      pause(1);
+    }
+  }
+  if (!held) {
+    // Writing without the lock risks the clobber this exists to prevent, but a
+    // voice-off that never reaches disk is worse. Take the write, and say so,
+    // because this should be vanishingly rare.
+    log(`state: could not take the settings lock within ${LOCK_WAIT_MS}ms; writing without it`);
+  }
+  try {
+    return fn();
+  } finally {
+    if (held) {
+      try {
+        unlinkSync(LOCK_FILE);
+      } catch {
+        // already gone
+      }
     }
   }
 }
@@ -252,11 +323,32 @@ export function writeState(patch) {
   }
 
   if (Object.keys(settingsPatch).length) {
-    const current = readState();
-    const next = { ...current, ...settingsPatch, updatedAt: new Date().toISOString() };
-    for (const k of RUNTIME_KEYS) delete next[k];
-    for (const [k, v] of Object.entries(settingsPatch)) if (v === undefined) delete next[k];
-    writeAtomic(next);
+    withSettingsLock(() => {
+      // Read the file as it is RIGHT NOW, inside the lock, and write back only
+      // the keys this patch actually carries. Merging onto a snapshot taken
+      // before the lock is what let one write resurrect another's `enabled`.
+      // Missing or corrupt are the only ways this comes back empty, and both
+      // legitimately mean "no usable prior settings". Fall back to the full
+      // default shape, never to a bare {}: merging a patch onto {} would write
+      // a file containing only that patch, silently dropping the provider, the
+      // voice, the tuning and even `enabled` itself.
+      const current = readSettingsFile() || normalize({});
+      const next = { ...current, ...settingsPatch, updatedAt: new Date().toISOString() };
+      for (const k of RUNTIME_KEYS) delete next[k];
+      for (const [k, v] of Object.entries(settingsPatch)) if (v === undefined) delete next[k];
+      // Voice on/off is the one setting worth an audit trail. When it changes,
+      // say who changed it, so "it turned itself back on" is answerable from
+      // the log instead of by guesswork.
+      if ('enabled' in settingsPatch) {
+        const was = current.enabled === true;
+        const now = settingsPatch.enabled === true;
+        if (was !== now) {
+          const who = path.basename(process.argv[1] || 'node');
+          log(`state: voice ${now ? 'ON' : 'off'} (was ${was ? 'ON' : 'off'}) set by ${who} pid ${process.pid}`);
+        }
+      }
+      writeAtomic(next);
+    });
   }
 
   return readState();

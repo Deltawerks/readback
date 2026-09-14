@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- **Voice could turn itself back on a moment after you turned it off.** Every
+  settings write was a read, a merge and a write, with nothing serializing them.
+  A write that began before your toggle, changing a voice or dragging a slider or
+  anything else the panel saves, merged the `enabled` it had read a moment
+  earlier and put that back on top. The panel's own request sequencing then
+  discarded the stale reply, so the switch went on showing off while the file
+  said on and every finished task spoke. Cycling the toggle cleared it until the
+  next time, which is what made it look intermittent rather than broken.
+
+  Settings writes now take a cross-process lock and merge onto the file as it is
+  inside that lock, so a write can only change the keys it actually carries. A
+  voice-off can no longer be undone by an unrelated save.
+
+- **Turning voice on or off is now recorded in the log**, with which process did
+  it and what it changed from. "It turned itself back on" is answerable from the
+  log now instead of by guesswork.
+
 ## 0.5.0
 
 The stop button is fixed at the root this time, and the fixes ship with tests

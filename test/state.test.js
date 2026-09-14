@@ -130,3 +130,76 @@ test('StateUnreadableError is exported for callers that must tell unknown from o
   assert.equal(typeof StateUnreadableError, 'function');
   assert.ok(new StateUnreadableError('x') instanceof Error);
 });
+
+// The lock is the whole fix, so test the lock itself rather than racing for the
+// symptom it prevents. Detecting the clobber by sampling was luck: the window is
+// about 1.5ms wide and Windows timers only fire every 15.6ms, so a sampler
+// missed it on a third of the runs even with the lock removed. Mutual exclusion
+// is deterministic. If two writers are ever inside at once, the lock is broken,
+// and a broken lock is what let a config write put `enabled` back to true a
+// moment after the toggle turned it off.
+//
+// Each worker records its own critical sections in memory and writes them once,
+// to its own file. Appending to one shared log from several processes is its own
+// source of failure on Windows and would have been measuring the harness again.
+test('the settings lock actually serializes writers', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-lock-'));
+  const mod = JSON.stringify(pathToFileURL(path.join(ROOT, 'src', 'state.js')).href);
+  const env = { READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: dir };
+  const outFile = (id) => path.join(dir, 'sections-' + id + '.json');
+
+  const spawnWorker = (id) =>
+    runChild(`
+      const { withSettingsLock } = await import(${mod});
+      const { writeFileSync } = await import('node:fs');
+      const sections = [];
+      for (let i = 0; i < 4; i++) {
+        withSettingsLock(() => {
+          const start = Date.now();
+          const until = start + 40;
+          while (Date.now() < until) {}
+          sections.push([start, Date.now()]);
+        });
+        await new Promise((r) => setTimeout(r, 1));
+      }
+      writeFileSync(${JSON.stringify(outFile(id))}, JSON.stringify(sections));
+    `, env);
+
+  const ids = ['a', 'b', 'c'];
+  const results = await Promise.all(ids.map(spawnWorker));
+  results.forEach((r, i) => assert.equal(r.code, 0, `lock worker ${ids[i]} crashed: ${r.err}`));
+
+  const held = [];
+  for (const id of ids) {
+    const spans = JSON.parse(readFileSync(outFile(id), 'utf8'));
+    assert.equal(spans.length, 4, `worker ${id} completed ${spans.length} of 4 sections`);
+    for (const [start, end] of spans) held.push({ id, start, end });
+  }
+  held.sort((x, y) => x.start - y.start);
+
+  const overlaps = [];
+  for (let i = 1; i < held.length; i++) {
+    if (held[i].start < held[i - 1].end) overlaps.push(`${held[i - 1].id} and ${held[i].id}`);
+  }
+  assert.equal(overlaps.length, 0, `writers were inside the lock at the same time: ${overlaps.join(', ')}`);
+});
+
+test('a settings write preserves the keys it does not carry', () => {
+  writeFileSync(
+    STATE_FILE,
+    JSON.stringify({
+      provider: 'inworld',
+      enabled: false,
+      maxChars: 9000,
+      inworld: { voiceId: 'Vinny', modelId: 'inworld-tts-1.5-mini', speed: 1.3, temperature: 1.3 },
+    })
+  );
+  // Changing a voice must not touch voice on/off, and must not drop everything
+  // else either: merging a patch onto an empty object once wiped the whole file.
+  writeState({ inworld: { voiceId: 'Ashley', modelId: 'inworld-tts-1.5-mini', speed: 1.1, temperature: 1 } });
+  const onDisk = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
+  assert.equal(onDisk.enabled, false, 'a config write must never change voice on/off');
+  assert.equal(onDisk.provider, 'inworld');
+  assert.equal(onDisk.maxChars, 9000);
+  assert.equal(onDisk.inworld.voiceId, 'Ashley');
+});

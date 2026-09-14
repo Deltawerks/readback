@@ -10,7 +10,7 @@ import { speak } from './speak.js';
 import { PROVIDER_IDS, getProvider } from './providers/index.js';
 import { log } from './log.js';
 
-const server = new McpServer({ name: 'readback', version: '0.5.0' });
+const server = new McpServer({ name: 'readback', version: '0.5.1' });
 
 function summarize(st) {
   const c = activeConfig(st);
