@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROVIDERS } from './providers/index.js';
@@ -47,22 +48,17 @@ function num(value, def) {
   return Number.isFinite(n) ? n : def;
 }
 
-// State + secrets live in a per-user app-data dir, deliberately NOT inside the
+// State + secrets live in a per-user dir, deliberately NOT inside the
 // repo: cloning into a cloud-synced or shared folder would otherwise sync your
 // API key along with it. Override with READBACK_STATE_DIR (tests use this).
 function defaultStateDir() {
-  if (process.platform === 'win32') {
-    // APPDATA is normally set, but a process launched from a stripped
-    // environment (a login/startup task, a service) can be missing it. Falling
-    // through to a different directory in that case is worse than useless: the
-    // panel and the hook workers end up on SEPARATE state files, so the toggle
-    // silently stops controlling anything. USERPROFILE gets us to the same
-    // place without depending on APPDATA being populated.
-    const base =
-      process.env.APPDATA ||
-      (process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData', 'Roaming'));
-    if (base) return path.join(base, 'Readback');
-  }
+  // Not %APPDATA% on Windows. Claude Desktop gives everything it launches (the
+  // hook that speaks, the MCP server) its own private copy of AppData, while the
+  // panel, started at login, reads the real one. Same path, two different files,
+  // so the panel's off switch never reached the voice. The profile folder itself
+  // is shared by both, which was checked by writing on each side and reading on
+  // the other.
+  if (process.platform === 'win32') return path.join(os.homedir(), '.readback');
   const base =
     process.env.XDG_CONFIG_HOME ||
     (process.env.HOME ? path.join(process.env.HOME, '.config') : '');
@@ -72,8 +68,10 @@ function defaultStateDir() {
 export const STATE_DIR = process.env.READBACK_STATE_DIR
   ? path.resolve(process.env.READBACK_STATE_DIR)
   : defaultStateDir();
-// Older in-repo locations, copied over on first run (originals left intact).
+// Older locations, copied over on first run (originals left intact). The old
+// Windows AppData spot comes first, so an upgrade keeps the saved key.
 export const LEGACY_STATE_DIRS = [
+  ...(process.platform === 'win32' && process.env.APPDATA ? [path.join(process.env.APPDATA, 'Readback')] : []),
   path.join(ROOT, '.readback'),
   path.join(ROOT, '.voicebox'),
 ];
@@ -93,12 +91,9 @@ export const LEGACY_STATE_DIRS = [
 // READBACK_CACHE_DIR, and set it for every process if you set it at all.
 function defaultCacheDir() {
   if (process.env.READBACK_CACHE_DIR) return path.resolve(process.env.READBACK_CACHE_DIR);
-  if (process.platform === 'win32') {
-    const base = process.env.LOCALAPPDATA
-      || (process.env.USERPROFILE && path.join(process.env.USERPROFILE, 'AppData', 'Local'));
-    if (base) return path.join(base, 'Readback');
-    return STATE_DIR;
-  }
+  // Same reason as the state dir: the queue and the stop signal only work if the
+  // panel and the voice see the same files, and AppData gives each side its own.
+  if (process.platform === 'win32') return path.join(os.homedir(), '.readback', 'cache');
   const base =
     process.env.XDG_CACHE_HOME || (process.env.HOME ? path.join(process.env.HOME, '.cache') : '');
   return base ? path.join(base, 'readback') : STATE_DIR;

@@ -141,13 +141,13 @@ you want to switch voice, provider or speed, then close it again.
   just pressed. The panel's Speak and preview buttons are unaffected: that is you
   at the keyboard, asking for it.
 
-Keys are stored per-user **outside the repo**: `%APPDATA%\Readback\secret.json`
+Keys are stored per-user **outside the repo**: `%USERPROFILE%\.readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
 cloud-synced folder can't sync your key with it. Override the location with
 `READBACK_STATE_DIR`.
 
 Working files (the log, the queue, the list of running players, the WAV chunks)
-live separately in `%LOCALAPPDATA%\Readback` (`~/.cache/readback` elsewhere), so
+live separately in `%USERPROFILE%\.readback\cache` (`~/.cache/readback` elsewhere), so
 they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
 
 > **If you override either path, set it for every Readback process, not just
@@ -194,7 +194,7 @@ acts as a backstop rather than clipping normal replies. Set
   hook to your global `settings.json`, it speaks in *every* project where voice
   is on, which adds up faster than you'd guess. Keep it per-project, or toggle
   voice off when you're not listening.
-- Trouble? Check `readback.log` in `%LOCALAPPDATA%\Readback` on Windows
+- Trouble? Check `readback.log` in `%USERPROFILE%\.readback\cache` on Windows
   (throwaway data is kept out of the roaming profile), or alongside the state dir
   otherwise.
 

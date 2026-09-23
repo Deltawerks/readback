@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.2
+
+### Fixed
+
+- **Voice off now stays off if you run Claude Code inside Claude Desktop on
+  Windows.** This is the bug behind every "off doesn't stay off" report, and
+  every earlier fix for it was aimed downstream of it.
+
+  Claude Desktop gives everything it starts, including the hook that speaks,
+  its own private copy of `AppData`. The panel, started at login or from a
+  shortcut, runs outside Claude and reads the real one. Readback kept its
+  settings in `AppData`, so the panel and the voice were reading two different
+  files that happened to share one path, and switching voice off in the panel
+  changed a file the voice never read. Cycling the toggle only seemed to help
+  because stopping playback works on the running process, not on the file.
+
+  Settings, the key and the working files now live in `%USERPROFILE%\.readback`,
+  which Claude Desktop does not redirect. Your existing key and settings are
+  copied there on first run (the originals are left where they were), and voice
+  starts off.
+
 ## 0.5.1
 
 ### Fixed

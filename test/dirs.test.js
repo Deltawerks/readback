@@ -235,3 +235,17 @@ test('voice off silences even when the setting cannot be saved', async () => {
     panel.kill();
   }
 });
+
+// On Windows, everything Claude Desktop launches (the hook that speaks) gets a
+// private copy of AppData, while the panel reads the real one. Anything kept
+// there is two files behind one path, which is why "off" never reached the
+// voice. Nothing may default into it.
+test('on Windows, settings and cache never default into AppData', { skip: process.platform !== 'win32' }, () => {
+  const d = dirsWith({});
+  for (const [name, dir] of [['STATE_DIR', d.STATE_DIR], ['CACHE_DIR', d.CACHE_DIR]]) {
+    for (const v of ['APPDATA', 'LOCALAPPDATA']) {
+      const root = (process.env[v] || '').toLowerCase();
+      assert.ok(!root || !dir.toLowerCase().startsWith(root), `${name} must not live under %${v}%: ${dir}`);
+    }
+  }
+});
