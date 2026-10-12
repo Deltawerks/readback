@@ -261,7 +261,7 @@ they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
 > independently from the environment they were launched in. When they disagree,
 > the toggle appears to work and controls nothing, because the half that speaks
 > is reading different files than the half you clicked. `npm run where` prints
-> the resolved paths; run it from the panel's environment and from a Claude Code
+> the resolved paths; run it from the panel's environment and from each connected assistant
 > session and compare. The panel also reports both at `/health`.
 
 Replies are cleaned before speaking (code blocks dropped,
@@ -298,6 +298,14 @@ acts as a backstop rather than clipping normal replies. Set
 - Trouble? Check `readback.log` in `%USERPROFILE%\.readback\cache` on Windows
   (throwaway data is kept out of the roaming profile), or alongside the state dir
   otherwise.
+
+## Contributors
+
+ReadBack is a DeltaWerks project built with contributions from multiple AI coding assistants:
+
+- **DeltaWerks** - project creator, product direction, design, and real-world testing.
+- **Claude (Anthropic)** - the original Claude integration and earlier speech, queue, and settings-reliability work.
+- **Codex (OpenAI)** - Codex integration, independent Claude/Codex profiles, Inworld TTS-2 controls, Windows playback-lifetime fixes, regression tests, and documentation for the 0.6 release.
 
 ## License
 
