@@ -8,7 +8,7 @@ import {
   writeEndMarker,
   stopPlayback,
 } from './audio.js';
-import { readState, writeState, StateUnreadableError } from './state.js';
+import { readAgentState, writeState, StateUnreadableError } from './state.js';
 import { enqueue, releaseTicket, waitTurn, currentEpoch, flushQueue } from './queue.js';
 import { log } from './log.js';
 
@@ -36,6 +36,8 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   const total = chunks.length;
   if (!total) return { spoken: 0, total: 0 };
   const aborted = () => ({ spoken: 0, total, aborted: true });
+  const agent = st.agent || 'claude';
+  const agentEpoch = currentEpoch(agent);
 
   // Take our place in line. (enqueue is a couple of file ops; when nothing else
   // is talking, waitTurn returns on the first pass with no sleep, so no latency.)
@@ -47,7 +49,7 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   // give up. Once it is our turn we need a definite yes.
   const stillEnabled = () => {
     try {
-      return readState().enabled;
+      return currentEpoch(agent) === agentEpoch && readAgentState(agent).enabled;
     } catch (err) {
       if (err instanceof StateUnreadableError) return true;
       throw err;
@@ -55,14 +57,16 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   };
   const definitelyEnabled = () => {
     try {
-      return readState().enabled === true;
+      return readAgentState(agent).enabled === true;
     } catch {
       return false;
     }
   };
   // Has the line been pulled out from under us? A stop or a flush bumps the
-  // epoch; queued speech additionally needs voice to still be on.
-  const lineStillOurs = () => currentEpoch() === epoch && (!queue || definitelyEnabled());
+  // epoch; all speech also respects the master and source switches.
+  const lineStillOurs = () => currentEpoch() === epoch && currentEpoch(agent) === agentEpoch && definitelyEnabled();
+
+  if (!definitelyEnabled()) { releaseTicket(ticket); return aborted(); }
 
   if (queue) {
     // Wait politely behind any active or queued utterance. Give up if voice is
@@ -83,7 +87,7 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   }
 
   const dir = newStreamDir();
-  const player = spawnStreamPlayer(dir);
+  const player = spawnStreamPlayer(dir, agent);
   // Attach the close listener up front so a fast utterance can't emit 'close'
   // before we await it.
   const closed = once(player, 'close');
@@ -118,10 +122,9 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
     first = await synthesize(chunks[0], st);
   } catch (err) {
     abandon();
-    stopPlayback();
     throw err;
   }
-  if (!writeChunk(dir, 0, first)) {
+  if (!lineStillOurs() || !writeChunk(dir, 0, first)) {
     abandon();
     return aborted();
   }

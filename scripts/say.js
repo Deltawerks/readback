@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Smoke test: `npm run say "hello there"` synthesizes and plays one line
 // through the active provider.
-import { readState, activeConfig } from '../src/state.js';
+import { readAgentState, activeConfig } from '../src/state.js';
 import { stripForSpeech } from '../src/tts.js';
 import { speak } from '../src/speak.js';
 
 const input = process.argv.slice(2).join(' ') || 'Readback is online and ready.';
-const st = readState();
+const st = readAgentState(process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'claude');
 const c = activeConfig(st);
 const clean = stripForSpeech(input) || input;
 
@@ -16,8 +16,8 @@ console.log(`Synthesizing: "${clean}"`);
 try {
   console.log('Playing…');
   // wait:true keeps this process alive until playback finishes.
-  await speak(clean, st, { wait: true });
-  console.log('Done.');
+  const result = await speak(clean, st, { wait: true });
+  console.log(result.aborted ? 'Muted or stopped; nothing spoken.' : 'Done.');
 } catch (err) {
   console.error(`Failed: ${err.message}`);
   process.exitCode = 1;

@@ -17,7 +17,7 @@ import {
   storedApiKey,
   envOverridesKey,
 } from './config.js';
-import { readState, writeState, updateProviderConfig, StateUnreadableError } from './state.js';
+import { readState, readAgentState, writeAgentState, AGENTS, writeState, updateProviderConfig, StateUnreadableError } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
@@ -47,7 +47,7 @@ const noOpen = process.env.READBACK_NO_OPEN || process.argv.includes('--no-open'
 // provider default) is clampKnobs, shared with the provider layer so there is
 // one definition of a valid value. Unchecked values used to reach the file, the
 // provider and the page, which then rendered NaN.
-const CONFIG_FIELDS = ['voiceId', 'modelId', 'speed', 'temperature', 'stability', 'similarity', 'style', 'speakerBoost'];
+const CONFIG_FIELDS = ['voiceId', 'modelId', 'speed', 'deliveryMode', 'stability', 'similarity', 'style', 'speakerBoost'];
 
 function pickConfig(cfg) {
   const out = {};
@@ -342,6 +342,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, stateResponse(st, remoteOk));
     }
 
+    // An explicit source + provider target survives tab switches and delayed
+    // slider requests. This local-only route cannot alter the master switch.
+    if (pathname === '/api/agent' && req.method === 'POST') {
+      const body = await readBody(req);
+      if (!AGENTS.includes(body.agent)) return send(res, 400, { error: 'unknown agent' });
+      if (body.enabled !== undefined && typeof body.enabled !== 'boolean') return send(res, 400, { error: 'enabled must be true or false' });
+      if (body.provider !== undefined && !PROVIDER_IDS.includes(body.provider)) return send(res, 400, { error: 'unknown provider' });
+      if (body.config && !PROVIDER_IDS.includes(body.configProvider)) return send(res, 400, { error: 'configProvider is required' });
+      const patch = {};
+      if (body.enabled !== undefined) patch.enabled = body.enabled;
+      if (body.provider !== undefined) patch.provider = body.provider;
+      if (body.config) patch[body.configProvider] = clampKnobs(body.configProvider, pickConfig(body.config));
+      let st;
+      try { st = writeAgentState(body.agent, patch); }
+      finally {
+        if (body.enabled === false) { flushQueue(body.agent); stopPlayback(body.agent); }
+      }
+      if (body.enabled !== undefined && (await stateFileOnDisk()).agents?.[body.agent]?.enabled !== body.enabled) {
+        return send(res, 500, { error: 'could not save the agent setting to disk' });
+      }
+      return send(res, 200, stateResponse(st));
+    }
+
     if (pathname === '/api/key' && req.method === 'POST') {
       const body = await readBody(req);
       const provider = body.provider === undefined ? 'inworld' : body.provider;
@@ -369,19 +392,26 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/voices' && req.method === 'GET') {
       const filter = url.searchParams.get('filter');
-      const voices = await listVoices(readState(), filter ? { filter } : undefined);
+      const agent = url.searchParams.get('agent') || 'claude';
+      const provider = url.searchParams.get('provider');
+      if (!AGENTS.includes(agent) || (provider && !PROVIDER_IDS.includes(provider))) return send(res, 400, { error: 'unknown agent or provider' });
+      const st = readAgentState(agent);
+      if (provider) st.provider = provider;
+      const voices = await listVoices(st, filter ? { filter } : undefined);
       return send(res, 200, { voices });
     }
 
     if (pathname === '/api/say' && req.method === 'POST') {
-      const { text } = await readBody(req);
-      const st = readState();
+      const { text, agent = 'claude' } = await readBody(req);
+      if (!AGENTS.includes(agent)) return send(res, 400, { error: 'unknown agent' });
+      const st = readAgentState(agent);
+      if (!st.enabled) return send(res, 200, { ok: false, reason: st.masterEnabled ? 'This agent is muted' : 'Master speech is off' });
       const clean = truncateForSpeech(stripForSpeech(typeof text === 'string' ? text : ''), st.maxChars);
       if (!clean) return send(res, 200, { ok: false, reason: 'nothing speakable' });
       // wait:false awaits the first chunk (so errors surface here), then
       // streams the rest in the background.
-      await speak(clean, st, { wait: false });
-      return send(res, 200, { ok: true });
+      const result = await speak(clean, st, { wait: false });
+      return send(res, 200, { ok: !result.aborted, reason: result.aborted ? 'Speech was muted or stopped' : undefined });
     }
 
     if (pathname === '/api/stop' && req.method === 'POST') {

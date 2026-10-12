@@ -5,21 +5,26 @@ const VOICES_URL = 'https://api.inworld.ai/voices/v1/voices';
 
 export const label = 'Inworld';
 
-// mini is the default: it costs half what max does per character and is plenty
-// for reading replies aloud.
 export const models = [
-  { id: 'inworld-tts-1.5-mini', label: 'inworld-tts-1.5-mini' },
-  { id: 'inworld-tts-1.5-max', label: 'inworld-tts-1.5-max' },
-  { id: 'inworld-tts-2', label: 'inworld-tts-2' },
+  { id: 'inworld-tts-2-flash', label: 'TTS-2 Flash' },
+  { id: 'inworld-tts-2', label: 'TTS-2 · Flagship' },
 ];
 
 // Tuning knobs the panel renders for this provider.
 export const knobs = [
   { key: 'speed', label: 'Speed', min: 0.5, max: 1.5, step: 0.1, suffix: 'x' },
-  { key: 'temperature', label: 'Expression', min: 0, max: 2, step: 0.1, hint: 'Voice temperature: higher is more expressive' },
+  { key: 'deliveryMode', label: 'Delivery', type: 'select', models: ['inworld-tts-2'], options: ['STABLE', 'BALANCED', 'CREATIVE'] },
 ];
 
-export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-1.5-mini', speed: 1.3, temperature: 0.1 };
+export const defaults = { voiceId: 'Luna', modelId: 'inworld-tts-2-flash', speed: 1.3, deliveryMode: 'BALANCED' };
+
+export function migrateConfig(cfg) {
+  const out = { ...cfg };
+  if (!out.modelId || /^inworld-tts-1(?:\.5)?(?:-mini|-max)?$/.test(out.modelId)) out.modelId = defaults.modelId;
+  if (!['STABLE', 'BALANCED', 'CREATIVE'].includes(out.deliveryMode)) out.deliveryMode = defaults.deliveryMode;
+  delete out.temperature;
+  return out;
+}
 
 // Keep a number inside the range the API accepts, and fall back to the default
 // when the panel sends something that is not a number at all.
@@ -37,14 +42,14 @@ export async function synthesize(text, cfg, apiKey) {
     voiceId: cfg.voiceId || defaults.voiceId,
     // Must agree with the declared default, or a config block that predates the
     // model picker quietly buys the model that costs twice as much.
-    modelId: cfg.modelId || defaults.modelId,
+    modelId: migrateConfig(cfg).modelId,
     audioConfig: {
       audioEncoding: 'LINEAR16', // = WAV with header
       speakingRate: clamp(cfg.speed, 0.5, 1.5, 1.0),
       sampleRateHertz: 48000,
     },
-    temperature: clamp(cfg.temperature, 0, 2, defaults.temperature),
   };
+  if (body.modelId === 'inworld-tts-2') body.deliveryMode = migrateConfig(cfg).deliveryMode;
 
   const res = await requestWithRetry(
     TTS_URL,

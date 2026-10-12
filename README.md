@@ -14,7 +14,7 @@ phone rings.
 - 🎚️ **Two providers.** [Inworld](https://inworld.ai) (hundreds of voices, cheap)
   and [ElevenLabs](https://elevenlabs.io), switchable in a click.
 - 🖥️ **GUI-tunable.** A little control panel for voice, model, speed and
-  expression, with a live voice picker and in-app key entry. No `.env` fiddling.
+  delivery, with separate Claude/Codex tabs, a live voice picker and in-app key entry. No `.env` fiddling.
 - ⚡ **Streaming.** Splits replies into sentences and starts talking on the first
   one, so audio kicks in fast even on long messages.
 - 🔀 **Multi-session.** Running Claude and Codex across several projects? Their replies
@@ -24,8 +24,9 @@ phone rings.
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic, OpenAI,
 > Inworld, or ElevenLabs.
 
-**Already using it?** 0.6.0 adds Codex through a separate adapter. Claude's hook,
-saved voice settings, provider keys, queue and stop behavior are retained. See
+**Already using it?** 0.6.0 adds Codex and independent agent profiles. Existing
+voices and speeds seed both profiles; deprecated Inworld models move to TTS-2
+Flash. The saved master mute and provider keys are preserved. See
 the [changelog](CHANGELOG.md) and the Codex setup below.
 
 ---
@@ -52,7 +53,7 @@ npm run panel        # opens the control panel in your browser
 ```
 
 In the panel: pick a **provider**, paste that provider's **API key**, choose a
-**voice**, and hit ▶ to hear it. Then connect Claude Code, Codex, or both.
+**voice**, enable master speech and that agent, and hit ▶ to hear it. Then connect Claude Code, Codex, or both.
 
 ### Claude Code setup
 
@@ -141,9 +142,16 @@ spaces or special characters work. It runs Node and `hook/codex-stop-hook.js`
 at the locations printed by `register:codex`. Regenerate the snippets if you
 move the installation or Node.
 
-**One master switch, one queue.** Both assistants use the same saved voice,
-provider and mute setting. Turning voice off from either assistant or the panel
-mutes both and clears pending speech. Rebooting does not reset that choice.
+**Two profiles, one master switch, one queue.** Claude and Codex each have a
+saved provider, voice, model, tuning and speech switch. The tabs select which
+profile you edit. Muting one agent stops its current and pending speech without
+interrupting the other. Master speech off (or MCP voice_off) mutes both, including
+previews; the Stop button cancels current and queued speech without changing
+saved switches. API keys are shared per provider. Rebooting preserves all choices.
+
+Codex's generated MCP snippet sets READBACK_SOURCE=codex. Claude defaults to its
+own profile. MCP provider/voice/model/speed tools edit only their source profile;
+set_agent_enabled changes its switch, while voice_on/off control the master.
 Use the same `READBACK_STATE_DIR` and `READBACK_CACHE_DIR` overrides in every
 process if you customize them.
 
@@ -161,9 +169,11 @@ code to the pre-Codex release without overwriting your checkout, create a separa
 checkout at commit `2ad8aeb80f0c3ba993d0da8b46cdf1eb6a17f649` (version 0.5.2), run
 `npm ci`, and regenerate the Claude registration for that location. Keep the
 current checkout until the old version is verified. Do not delete `.readback`:
-it holds your saved voice and key. No settings migration is needed for 0.6.0.
+it holds your saved voices and keys. Version 0.6.0 automatically adds agent
+profiles on the next settings save. Back up state.json before downgrading: 0.5.2
+cannot control separate profiles, and older Inworld models are deprecated.
 
-If Codex is silent, check hook trust, the master switch, and `readback.log` in
+If Codex is silent, check hook trust, both master and Codex switches, and `readback.log` in
 the cache directory. Connecting the MCP server alone does not enable auto-speak.
 
 **Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
@@ -194,13 +204,11 @@ you want to switch voice, provider or speed, then close it again.
 - Multiple projects or assistants at once: their replies line up and read one after another
   instead of stomping each other. "voice off" (or the panel's Stop button) clears
   the whole queue at once, for when the phone rings.
-- In the panel: switch provider, pick a voice, drag speed / expression, hit ▶ to
+- In the panel: switch provider, pick a voice, adjust speed / delivery, hit ▶ to
   preview. The panel's Speak/preview takes over immediately (it's you, at the
   keyboard); only the automatic per-reply speech queues.
-- Voice off means off. The MCP `say` tool now refuses while voice is off, unless
-  it is called with `force: true`, so Claude can't decide to talk over a mute you
-  just pressed. The panel's Speak and preview buttons are unaffected: that is you
-  at the keyboard, asking for it.
+- Voice off means off. Both the MCP `say` tool and panel previews respect the
+  master and selected agent switches. Enable both switches to hear a test.
 
 Keys are stored per-user **outside the repo**: `%USERPROFILE%\.readback\secret.json`
 on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
@@ -243,18 +251,13 @@ acts as a backstop rather than clipping normal replies. Set
   your API key go to whichever provider you picked (Inworld or ElevenLabs) over
   HTTPS, and nowhere else. Readback has no servers, no telemetry, no analytics,
   and no update check.
-- **It costs money per character spoken.** Readback defaults to the cheapest
-  sensible model, Inworld `tts-1.5-mini`, at $0.005 per 1,000 characters ($5 per
-  million); `max` is double that for a bit more richness. **ElevenLabs costs 10
-  to 20 times as much**: $0.05 per 1,000 characters on Flash and Turbo, $0.10 on
-  `eleven_v3` and `eleven_multilingual_v2`. At the default 12,000 character cap,
-  one long reply is about 6 cents on Inworld mini and $0.60 to $1.20 on
-  ElevenLabs. If you run ElevenLabs, set `READBACK_MAX_CHARS` to something
-  shorter so a wall of text can't run up a dollar on its own. The panel shows the
-  rate for the model you have selected. Worth knowing either way: if you add the
-  hook to your global `settings.json`, it speaks in *every* project where voice
-  is on, which adds up faster than you'd guess. Keep it per-project, or toggle
-  voice off when you're not listening.
+- **It costs money per character spoken.** Inworld defaults to TTS-2 Flash
+  (inworld-tts-2-flash), its most cost-efficient current model. TTS-2 flagship
+  (inworld-tts-2) adds Stable, Balanced and Creative delivery modes. Flash exposes
+  speed only; neither sends the obsolete temperature setting. ElevenLabs remains
+  available with its own voice and tuning controls. Check your provider's current
+  plan/pricing before enabling speech across every project. READBACK_MAX_CHARS
+  limits the length of each spoken reply (12,000 characters by default).
 - Trouble? Check `readback.log` in `%USERPROFILE%\.readback\cache` on Windows
   (throwaway data is kept out of the roaming profile), or alongside the state dir
   otherwise.

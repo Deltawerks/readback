@@ -5,7 +5,7 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readState } from '../src/state.js';
+import { readAgentState } from '../src/state.js';
 import { log } from '../src/log.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -29,7 +29,7 @@ async function main() {
     // ignore malformed payloads
   }
 
-  const st = readState();
+  const st = readAgentState('claude');
   if (!st.enabled) return;
 
   const transcriptPath = payload.transcript_path;

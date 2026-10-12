@@ -3,7 +3,7 @@
 // clean it up for speech, synthesize with the active provider, and stream it.
 // All failures are logged and swallowed. This must never crash or surface an error.
 import { readFileSync } from 'node:fs';
-import { readState, writeState, activeConfig } from '../src/state.js';
+import { readAgentState, writeState, activeConfig } from '../src/state.js';
 import { currentReply } from '../src/transcript.js';
 import { stripForSpeech, truncateForSpeech } from '../src/tts.js';
 import { speak } from '../src/speak.js';
@@ -26,7 +26,7 @@ async function main() {
   const transcriptPath = process.argv[2];
   if (!transcriptPath) return;
 
-  let st = readState();
+  let st = readAgentState('claude');
   if (!st.enabled) return;
 
   // The final reply may not be flushed to the transcript at the instant the Stop
@@ -40,7 +40,7 @@ async function main() {
     if (reply && !isClaimed(reply.id)) break;
     reply = null;
     await sleep(120);
-    st = readState();
+    st = readAgentState('claude');
     if (!st.enabled) return; // toggled off while we waited
   }
 

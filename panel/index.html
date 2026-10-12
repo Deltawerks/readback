@@ -54,7 +54,8 @@
   .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   .brand { display: flex; align-items: center; gap: 12px; }
   .logo-img { height: 42px; width: auto; display: block; filter: drop-shadow(0 0 7px rgba(51,120,246,.35)); }
-  .head-right { display: flex; align-items: center; gap: 12px; }
+  .master-label { font-size: 10px; color: var(--dim); letter-spacing: 1px; text-transform: uppercase; }
+  .head-right { display: flex; flex-wrap: wrap; justify-content: flex-end; max-width: 100px; align-items: center; gap: 12px; }
   .spk { display: inline-flex; align-items: center; transition: color .15s ease, filter .15s ease; }
   .spk.on { color: var(--cyan-2); filter: drop-shadow(0 0 6px rgba(103,232,249,.5)); }
   .spk.off { color: var(--dim); }
@@ -123,15 +124,25 @@
         </div>
       </div>
       <div class="head-right">
+        <span class="master-label" style="width:100%;text-align:right">Master speech</span>
         <span class="spk off" id="spk" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a9 9 0 0 1 0 14"/></svg>
         </span>
-        <button id="toggle" class="toggle" role="switch" aria-checked="false" aria-label="Voice output on or off"><span class="knob"></span></button>
+        <button id="toggle" class="toggle" role="switch" aria-checked="false" aria-label="Master speech" title="Master speech — all agents"><span class="knob"></span></button>
       </div>
     </div>
 
     <div class="rule"></div>
 
+    <div class="seg mb" id="agentTabs" role="tablist" aria-label="Agent settings">
+      <button id="tabClaude" role="tab" aria-selected="true" data-agent="claude">Claude</button>
+      <button id="tabCodex" role="tab" aria-selected="false" data-agent="codex">Codex</button>
+    </div>
+    <div class="switch-row">
+      <span class="lbl2" id="agentLabel">Claude speech</span>
+      <button id="agentToggle" class="toggle sm" role="switch" aria-checked="false" aria-label="Claude speech"><span class="knob"></span></button>
+    </div>
+    <div class="keyState mb" id="agentHint"></div>
     <label class="lbl">Provider</label>
     <div class="seg" id="providerSeg"></div>
 
@@ -181,8 +192,11 @@ let state = {}, meta = {}, keys = {}, voiceList = [];
 // What the last full render actually drew, so the poll can tell a real change
 // from a repaint that would only disturb a control in use.
 let drawn = { provider: null, modelId: null };
-const prov = () => state.provider;
-const cfg = () => state[state.provider] || {};
+let selectedAgent = 'claude';
+const profile = () => state.agents?.[selectedAgent] || {};
+const prov = () => profile().provider;
+const cfg = () => profile()[prov()] || {};
+const agentName = () => selectedAgent === 'codex' ? 'Codex' : 'Claude';
 
 function toast(msg, isErr) {
   const t = $('toast');
@@ -254,11 +268,11 @@ function absorb(s, t) {
   return true;
 }
 
-async function patchTop(body) {
+async function patchTop(body, route = '/api/state') {
   const t = nextTicket();
   writesInFlight++;
   try {
-    absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), t);
+    absorb(await api(route, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }), t);
     syncError = '';
     return true;
   } catch (e) {
@@ -271,12 +285,8 @@ async function patchTop(body) {
     writesInFlight--;
   }
 }
-async function patchConfig(config) {
-  const t = nextTicket();
-  writesInFlight++;
-  try { absorb(await api('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config }) }), t); }
-  catch (e) { toast('Could not save: ' + e.message, true); }
-  finally { writesInFlight--; }
+async function patchConfig(config, agent = selectedAgent, configProvider = prov()) {
+  return patchTop({ agent, configProvider, config }, '/api/agent');
 }
 
 // The buttons themselves depend only on the provider list, which never changes
@@ -305,7 +315,7 @@ function markActiveProvider() {
 }
 async function switchProvider(id) {
   if (id === prov()) return;
-  await patchTop({ provider: id });
+  await patchTop({ agent: selectedAgent, provider: id }, '/api/agent');
   await renderAll();
 }
 function renderModels() {
@@ -322,7 +332,7 @@ function renderModels() {
 // Inworld's mini, which is worth seeing before you pick, not after the bill. A
 // model with no verified rate shows nothing rather than a guess.
 const COST_PER_1K = {
-  inworld: { 'inworld-tts-1.5-mini': '$0.005', 'inworld-tts-1.5-max': '$0.01' },
+  inworld: {},
   elevenlabs: {
     eleven_flash_v2_5: '$0.05',
     eleven_turbo_v2_5: '$0.05',
@@ -332,7 +342,7 @@ const COST_PER_1K = {
 };
 function renderCost() {
   const price = (COST_PER_1K[prov()] || {})[cfg().modelId] || '';
-  $('cost').textContent = price ? 'About ' + price + ' per 1,000 characters spoken.' : '';
+  $('cost').textContent = prov() === 'inworld' ? (cfg().modelId === 'inworld-tts-2-flash' ? 'Fastest and most cost-effective · default for ReadBack' : 'Flagship quality with three delivery modes') : (price ? 'About ' + price + ' per 1,000 characters spoken.' : '');
 }
 // A stored value that isn't a finite number (a hand-edited state file, a value
 // left over from an older build) used to print NaN in the readout and leave the
@@ -352,32 +362,45 @@ function knobValue(k) {
 function renderTuning() {
   const box = $('tuning'); box.innerHTML = '';
   const knobs = (meta[prov()] && meta[prov()].knobs) || [];
+  const agent = selectedAgent, provider = prov();
   for (const k of knobs) {
+    if (k.models && !k.models.includes(cfg().modelId)) continue;
+    if (k.type === 'select') {
+      const row = document.createElement('div'); row.className = 'slider';
+      const label = document.createElement('label'); label.className = 'lbl2'; label.textContent = k.label; label.htmlFor = 'knob-' + k.key;
+      const sel = document.createElement('select'); sel.id = 'knob-' + k.key;
+      for (const value of k.options) {
+        const o = document.createElement('option'); o.value = value; o.textContent = value[0] + value.slice(1).toLowerCase(); sel.appendChild(o);
+      }
+      sel.value = cfg()[k.key] || meta[provider].defaults[k.key];
+      sel.addEventListener('change', () => patchConfig({ [k.key]: sel.value }, agent, provider));
+      row.append(label, sel); box.appendChild(row); continue;
+    }
     if (k.type === 'toggle') {
       const row = document.createElement('div'); row.className = 'switch-row';
       const label = document.createElement('span'); label.className = 'lbl2'; label.textContent = k.label;
       const on = !!cfg()[k.key];
       const btn = document.createElement('button'); btn.className = 'toggle sm'; btn.setAttribute('role', 'switch'); btn.setAttribute('aria-checked', on ? 'true' : 'false'); btn.innerHTML = '<span class="knob"></span>';
-      btn.addEventListener('click', () => { const nv = btn.getAttribute('aria-checked') !== 'true'; btn.setAttribute('aria-checked', nv ? 'true' : 'false'); patchConfig({ [k.key]: nv }); });
+      btn.addEventListener('click', () => { const nv = btn.getAttribute('aria-checked') !== 'true'; btn.setAttribute('aria-checked', nv ? 'true' : 'false'); patchConfig({ [k.key]: nv }, agent, provider); });
       row.appendChild(label); row.appendChild(btn); box.appendChild(row);
       continue;
     }
     const row = document.createElement('div'); row.className = 'slider';
     const label = document.createElement('span'); label.className = 'lbl2'; label.textContent = k.label;
-    const input = document.createElement('input'); input.type = 'range'; input.min = k.min; input.max = k.max; input.step = k.step;
+    const input = document.createElement('input'); input.type = 'range'; input.setAttribute('aria-label', k.label); input.min = k.min; input.max = k.max; input.step = k.step;
     const val = knobValue(k); input.value = val;
     const out = document.createElement('output');
     const fmt = (v) => Number(v).toFixed(k.step < 1 ? (k.step < 0.1 ? 2 : 1) : 0) + (k.suffix || '');
     out.textContent = fmt(val);
     let timer;
-    input.addEventListener('input', () => { out.textContent = fmt(input.value); clearTimeout(timer); timer = setTimeout(() => patchConfig({ [k.key]: Number(input.value) }), 250); });
+    input.addEventListener('input', () => { out.textContent = fmt(input.value); clearTimeout(timer); timer = setTimeout(() => patchConfig({ [k.key]: Number(input.value) }, agent, provider), 250); });
     row.appendChild(label); row.appendChild(input); row.appendChild(out); box.appendChild(row);
     if (k.hint) { const h = document.createElement('div'); h.className = 'hint'; h.textContent = k.hint; box.appendChild(h); }
   }
 }
 function renderKey() {
   const m = meta[prov()] || {};
-  $('keyLabel').textContent = (m.label || '') + ' API key';
+  $('keyLabel').textContent = (m.label || '') + ' API key · shared';
   $('apiKey').value = '';
   renderKeyState();
 }
@@ -404,6 +427,15 @@ let syncError = '';
 
 function renderStatus() {
   const on = !!state.enabled;
+  const agentOn = profile().enabled === true;
+  for (const b of $('agentTabs').querySelectorAll('button')) {
+    b.classList.toggle('active', b.dataset.agent === selectedAgent);
+    b.setAttribute('aria-selected', String(b.dataset.agent === selectedAgent));
+  }
+  $('agentLabel').textContent = agentName() + ' speech';
+  $('agentToggle').setAttribute('aria-label', agentName() + ' speech');
+  $('agentToggle').setAttribute('aria-checked', String(agentOn && !syncError));
+  $('agentHint').textContent = !on ? 'Master speech is off for both agents.' : (agentOn ? agentName() + ' replies will be read aloud.' : agentName() + ' is muted. The other agent is unchanged.');
   $('toggle').setAttribute('aria-checked', on ? 'true' : 'false');
   $('spk').className = 'spk ' + (on ? 'on' : 'off');
   $('dot').className = 'dot ' + (syncError ? 'off' : on ? 'on' : 'off');
@@ -415,7 +447,7 @@ function renderStatus() {
     return;
   }
   $('status').style.color = '';
-  $('status').textContent = (on ? 'voice on' : 'muted') + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (voiceName() || 'no voice') + ' · localhost:' + location.port;
+  $('status').textContent = (!on ? 'all speech muted' : agentName() + (agentOn ? ' on' : ' muted')) + ' · ' + (meta[prov()] ? meta[prov()].label : prov()) + ' · ' + (voiceName() || 'no voice') + ' · localhost:' + location.port;
 }
 function fillVoices(voices) {
   voiceList = voices || [];
@@ -441,11 +473,19 @@ function fillVoices(voices) {
     sel.selectedIndex = 0;
   }
 }
+let voicesRequest = 0;
 async function loadVoices() {
-  if (!(keys[prov()] && keys[prov()].hasKey)) { fillVoices([]); renderStatus(); return; }
-  // Goes out to the provider, so it gets a network budget, not the panel deadline.
-  try { const { voices } = await api('/api/voices', undefined, SLOW_TIMEOUT_MS); fillVoices(voices || []); }
-  catch (e) { fillVoices([]); toast('Could not load voices: ' + e.message, true); }
+  const request = ++voicesRequest, agent = selectedAgent, provider = prov();
+  fillVoices([]);
+  if (!keys[provider]?.hasKey) { renderStatus(); return; }
+  try {
+    const { voices } = await api('/api/voices?agent=' + agent + '&provider=' + provider, undefined, SLOW_TIMEOUT_MS);
+    if (request !== voicesRequest || agent !== selectedAgent || provider !== prov()) return;
+    fillVoices(voices || []);
+  } catch (e) {
+    if (request !== voicesRequest || agent !== selectedAgent || provider !== prov()) return;
+    toast('Could not load voices: ' + e.message, true);
+  }
   renderStatus();
 }
 // The full redraw: every control, rebuilt from state. Only for a user action or
@@ -466,7 +506,7 @@ async function renderAll() {
 // Those are rebuilt only when the provider or the model actually changed.
 function renderPoll() {
   if (drawn.provider !== prov()) { renderAll(); return; }
-  if (drawn.modelId !== cfg().modelId) renderModels();
+  if (drawn.modelId !== cfg().modelId) { renderModels(); renderTuning(); }
   markActiveProvider(); renderKeyState(); renderStatus();
 }
 
@@ -494,24 +534,22 @@ async function refreshState() {
 }
 
 async function saveKey() {
+  const provider = prov();
   const key = $('apiKey').value.trim();
   if (!key) { toast('Paste a key first', true); return; }
   try {
-    const r = await api('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: prov(), apiKey: key }) });
-    $('apiKey').value = '';
-    keys[prov()] = { hasKey: r.hasKey, hint: r.keyHint, envOverride: !!r.envOverride };
-    renderKey(); toast('Key saved');
+    const r = await api('/api/key', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider, apiKey: key }) });
+    if (provider === prov()) $('apiKey').value = '';
+    keys[provider] = { hasKey: r.hasKey, hint: r.keyHint, envOverride: !!r.envOverride };
+    renderKeyState(); toast('Key saved');
     await loadVoices();
   } catch (e) { toast('Could not save key: ' + e.message, true); }
 }
 async function say(text) {
   // Synthesizes the first chunk before it answers, so it gets the long budget.
-  try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }, SLOW_TIMEOUT_MS);
-    // Preview deliberately works while muted, which is confusing on its own: a
-    // successful test says nothing about whether replies will actually speak.
-    // Say so, rather than letting it read as "everything is fine".
-    if (r.ok) toast(state.enabled ? 'Speaking…' : 'Speaking (auto-speak is OFF)');
-    else toast('Nothing to speak', true);
+  try { const r = await api('/api/say', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, agent: selectedAgent }) }, SLOW_TIMEOUT_MS);
+    if (r.ok) toast('Speaking…');
+    else toast(r.reason || 'Nothing to speak', true);
   } catch (e) { toast('Speak failed: ' + e.message, true); }
 }
 
@@ -525,18 +563,27 @@ $('toggle').addEventListener('click', async () => {
   }
   renderStatus();
 });
+for (const b of $('agentTabs').querySelectorAll('button')) b.addEventListener('click', () => {
+  selectedAgent = b.dataset.agent; renderAll();
+});
+$('agentToggle').addEventListener('click', async () => {
+  const agent = selectedAgent, enabled = !profile().enabled;
+  const ok = await patchTop({ agent, enabled }, '/api/agent');
+  if (!ok) await refreshState();
+  renderStatus();
+});
 $('voice').addEventListener('change', (e) => {
   patchConfig({ voiceId: e.target.value });
-  state[prov()].voiceId = e.target.value;
+  profile()[prov()].voiceId = e.target.value;
   const ph = $('voice').querySelector('option[data-placeholder]');
   if (ph) ph.remove();                               // a voice is picked now
   renderStatus();
 });
 $('model').addEventListener('change', (e) => {
   patchConfig({ modelId: e.target.value });
-  state[prov()].modelId = e.target.value;
+  profile()[prov()].modelId = e.target.value;
   drawn.modelId = e.target.value;                    // the poll needn't rebuild
-  renderCost();
+  renderCost(); renderTuning();
 });
 $('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
 $('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });

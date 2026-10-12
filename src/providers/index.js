@@ -43,6 +43,11 @@ export function clampKnobs(providerId, cfg) {
     const raw = out[knob.key];
     if (raw === undefined) continue;
 
+    if (knob.type === 'select') {
+      out[knob.key] = knob.options.includes(raw) ? raw : provider.defaults[knob.key];
+      continue;
+    }
+
     if (knob.type === 'toggle') {
       // A checkbox posts a JSON boolean, but the string "false" would otherwise
       // coerce to true and turn a knob on by writing it off.

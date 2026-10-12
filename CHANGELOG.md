@@ -6,20 +6,30 @@
 
 - **Codex auto-speak:** a dedicated `Stop` hook accepts the finished reply from
   Codex and sends it to ReadBack's existing automatic speech queue. Claude and
-  Codex share the saved voice, master switch and queue; duplicate Codex hook
+  Codex share the master switch and queue; duplicate Codex hook
   delivery is claimed once per session/turn. No Codex transcript scraping.
 - `npm run register:codex` generates hook and optional MCP snippets without
   changing either assistant's configuration or ReadBack settings. The setup
-  guide includes hook trust, shared controls and rollback instructions.
+  guide includes hook trust, independent profiles and rollback instructions.
 - Codex-only cleanup skips app directives and citation metadata when speaking.
-- The panel now says **Voice for Claude & Codex**. The ReadBack name stays.
+- The panel now says **Voice for Claude & Codex**, with an independent speech
+  toggle, provider, voice, model and tuning for each agent. Keys remain shared.
+- Inworld defaults and deprecated 1/1.5 models migrate to TTS-2 Flash, preserving
+  voice and speed. Flagship TTS-2 uses the supported deliveryMode enum:
+  Stable, Balanced or Creative. Flash shows speed only.
+- Per-agent mute cancels only that source's players and queued workers. Master
+  mute also blocks manual previews and MCP say; the old force bypass is removed.
+- Profile updates merge under the existing cross-process settings lock. Saved
+  master mute is preserved, and runtime bookkeeping remains in a separate file.
 
 ### Compatibility
 
 - Local Windows Codex chats with lifecycle-hook support. Remote/cloud execution
   is not supported. Codex hooks must be reviewed and trusted by the user.
-- Claude's hook/parser, settings persistence, provider integration, queue and
-  audio player are unchanged. There is no settings migration or new API key.
+- Existing settings seed both profiles on upgrade. The legacy top-level provider
+  fields mirror Claude for compatibility. No new provider key is required.
+- Codex's MCP registration sets READBACK_SOURCE=codex; existing Claude MCP
+  registrations default to Claude. Restart long-lived panels/MCP clients after upgrading.
 
 ## 0.5.2
 

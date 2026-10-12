@@ -2,7 +2,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { readState, writeState, updateProviderConfig, activeConfig } from './state.js';
+import { readAgentState, writeAgentState, writeState, activeConfig } from './state.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
@@ -10,15 +10,19 @@ import { speak } from './speak.js';
 import { PROVIDER_IDS, getProvider } from './providers/index.js';
 import { log } from './log.js';
 
+const SOURCE = process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'claude';
+const readState = () => readAgentState(SOURCE);
+const updateProviderConfig = (provider, patch) => writeAgentState(SOURCE, { [provider]: patch });
+
 const server = new McpServer({ name: 'readback', version: '0.6.0' });
 
 function summarize(st) {
   const c = activeConfig(st);
   const tune =
     st.provider === 'inworld'
-      ? `speed ${c.speed} · expression ${c.temperature}`
+      ? `speed ${c.speed}${c.modelId === 'inworld-tts-2' ? ' · delivery ' + c.deliveryMode : ''}`
       : `speed ${c.speed} · stability ${c.stability} · style ${c.style}`;
-  return `voice ${st.enabled ? 'ON' : 'off'} · ${st.provider} · ${c.voiceId || '(no voice)'} · ${c.modelId} · ${tune}`;
+  return `${SOURCE} voice ${st.enabled ? 'ON' : 'off'} (master ${st.masterEnabled ? 'on' : 'off'}, agent ${st.agentEnabled ? 'on' : 'off'}) · ${st.provider} · ${c.voiceId || '(no voice)'} · ${c.modelId} · ${tune}`;
 }
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] });
@@ -29,10 +33,13 @@ server.registerTool(
   {
     title: 'Turn voice on',
     description:
-      'Enable spoken voice output. After this, your replies are read aloud automatically (by the Stop hook) until voice_off is called.',
+      'Enable the master speech switch for both agents. Each agent also has its own switch; use set_agent_enabled to change this agent’s switch.',
     inputSchema: {},
   },
-  async () => text(`🔊 ${summarize(writeState({ enabled: true }))}`)
+  async () => {
+    writeState({ enabled: true });
+    return text(`🔊 ${summarize(readState())}`);
+  }
 );
 
 server.registerTool(
@@ -49,10 +56,9 @@ server.registerTool(
     // starts talking and "voice off" appears to do nothing. The silencing runs
     // whether or not the save succeeds: an unsaved setting is something to
     // report, not a reason to keep talking.
-    let st;
     let saveError;
     try {
-      st = writeState({ enabled: false });
+      writeState({ enabled: false });
     } catch (err) {
       saveError = err;
     } finally {
@@ -64,9 +70,19 @@ server.registerTool(
         `🔇 stopped the audio, but the setting could not be saved (${saveError.message}), so the next reply may still speak. Try voice_off again.`
       );
     }
-    return text(`🔇 ${summarize(st)}`);
+    return text(`🔇 ${summarize(readState())}`);
   }
 );
+
+server.registerTool('set_agent_enabled', {
+  title: 'Enable or mute this agent',
+  description: 'Enable or mute only this agent. Master mute still takes priority; muting stops only this agent’s speech.',
+  inputSchema: { enabled: z.boolean() },
+}, async ({enabled}) => {
+  try { writeAgentState(SOURCE, {enabled}); }
+  finally { if (!enabled) { flushQueue(SOURCE); stopPlayback(SOURCE); } }
+  return text(summarize(readState()));
+});
 
 server.registerTool(
   'voice_status',
@@ -98,21 +114,21 @@ server.registerTool(
   {
     title: 'Say text now',
     description:
-      'Speak the given text aloud once, right now. Refuses while voice is off unless force is true; when the user has turned voice off, they mean it.',
+      'Speak the given text aloud once, right now. Respects both master mute and this agent’s mute.',
     inputSchema: {
       text: z.string().describe('The text to speak aloud'),
-      force: z.boolean().optional().describe('Speak even though voice is off. Only when the user explicitly asks for it.'),
     },
   },
-  async ({ text: input, force }) => {
+  async ({ text: input }) => {
     try {
       const st = readState();
-      if (!st.enabled && !force) {
-        return text('🔇 voice is off, so nothing was spoken. Pass force: true only if the user explicitly wants this said aloud.');
+      if (!st.enabled) {
+        return text('🔇 voice is off, so nothing was spoken. Enable the master and this agent in ReadBack first.');
       }
       const clean = truncateForSpeech(stripForSpeech(input), st.maxChars);
       if (!clean || clean.length < 2) return text('(nothing speakable in that text)');
-      await speak(clean, st, { wait: false });
+      const result = await speak(clean, st, { wait: false });
+      if (result.aborted) return text('Speech was muted or stopped.');
       return text(`🗣 speaking (${activeConfig(st).voiceId || st.provider})`);
     } catch (err) {
       log('say error', err.message);
@@ -130,7 +146,8 @@ server.registerTool(
   },
   async ({ provider }) => {
     if (!PROVIDER_IDS.includes(provider)) return fail(`unknown provider: ${provider}`);
-    return text(`provider → ${writeState({ provider }).provider}`);
+    writeAgentState(SOURCE, { provider });
+    return text(`provider → ${readState().provider}`);
   }
 );
 

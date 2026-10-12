@@ -4,13 +4,13 @@
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { codexReply, readHookInput } from '../src/codex.js';
-import { readState } from '../src/state.js';
+import { readAgentState } from '../src/state.js';
 import { log } from '../src/log.js';
 
 try {
   const payload = await readHookInput(process.stdin);
   const reply = codexReply(payload);
-  if (reply && readState().enabled) {
+  if (reply && readAgentState('codex').enabled) {
     const worker = spawn(process.execPath, [fileURLToPath(new URL('./codex-worker.js', import.meta.url))], {
       detached: true,
       stdio: ['pipe', 'ignore', 'ignore'],

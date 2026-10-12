@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory = $true)][string]$Dir,
-  [string]$PlayersDir = ''
+  [string]$PlayersDir = '',
+  [ValidateSet('claude', 'codex')][string]$Agent = 'claude'
 )
 
 # Streaming player: plays chunk-000.wav, chunk-001.wav, ... from $Dir in order,

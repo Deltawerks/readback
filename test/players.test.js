@@ -157,3 +157,25 @@ test('two tickets or stream dirs from one process in the same millisecond do not
   assert.equal(existsSync(d2), true);
   assert.equal(readdirSync(DIR).filter((f) => f.startsWith('stream-')).length, 1);
 });
+
+test('muting one agent stops its marked and unmarked players without stopping the other agent', async () => {
+  const { stopPlayback } = await import('../src/audio.js');
+  const children = [];
+  try {
+    for (const agent of ['claude', 'codex']) {
+      for (const marked of [true, false]) {
+        const stream = mkdtempSync(path.join(tmpdir(), 'readback-source-player-'));
+        const c = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', STREAM_SCRIPT, '-Dir', stream, '-PlayersDir', PLAYERS_DIR, '-Agent', agent], {stdio:'ignore',windowsHide:true});
+        children.push({c,agent});
+        if (marked) recordPlayer(c.pid, agent);
+      }
+    }
+    await sleep(1000);
+    assert.ok(children.every(({c})=>pidAlive(c.pid)), 'fixture players must start');
+    stopPlayback('codex');
+    for (const {c,agent} of children) {
+      if (agent === 'codex') assert.ok(await waitDead(c.pid), 'both Codex players must stop');
+      else assert.ok(pidAlive(c.pid), 'Claude must keep playing');
+    }
+  } finally { for (const {c} of children) { try { c.kill(); } catch {} } }
+});

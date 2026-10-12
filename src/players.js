@@ -50,9 +50,9 @@ export function markerPath(pid) {
   return path.join(PLAYERS_DIR, String(pid));
 }
 
-export function recordPlayer(pid) {
+export function recordPlayer(pid, agent = 'claude') {
   if (!existsSync(PLAYERS_DIR)) mkdirSync(PLAYERS_DIR, { recursive: true });
-  writeFileSync(markerPath(pid), JSON.stringify({ pid, started: Date.now() }));
+  writeFileSync(markerPath(pid), JSON.stringify({ pid, started: Date.now(), agent }));
 }
 
 export function forgetPlayer(pid) {
@@ -78,13 +78,16 @@ export function livePlayers(now = Date.now()) {
     const file = markerPath(pid);
     let mtime = 0;
     let started = 0;
+    let agent = 'claude';
     try {
       mtime = statSync(file).mtimeMs;
     } catch {
       continue;
     }
     try {
-      started = Number(JSON.parse(readFileSync(file, 'utf8')).started) || 0;
+      const data = JSON.parse(readFileSync(file, 'utf8'));
+      started = Number(data.started) || 0;
+      agent = data.agent === 'codex' ? 'codex' : 'claude';
     } catch {
       // a marker from before start times were recorded; the kill below then
       // relies on the process name alone
@@ -93,7 +96,7 @@ export function livePlayers(now = Date.now()) {
       forgetPlayer(pid);
       continue;
     }
-    live.push({ pid, started, mtime });
+    live.push({ pid, started, mtime, agent });
   }
   return live;
 }
@@ -143,14 +146,16 @@ export function killPlayers(players) {
 // script's file name, which killed unrelated shells and editors, and matched
 // itself, which aborted the sweep half way through. Scoping to the players
 // folder also keeps an isolated test run from silencing the user's real reply.
-export function sweepPlayers() {
+export function sweepPlayers(agent) {
+  if (agent !== undefined && !['claude', 'codex'].includes(agent)) throw new Error('unknown agent');
   const script = `
     $script = '*' + $env:RB_SCRIPT + '*'
     $players = '*-PlayersDir*' + $env:RB_PLAYERS_DIR + '*'
     $ids = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
       Where-Object {
         $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*' -and
-        $_.CommandLine -like $script -and $_.CommandLine -like $players
+        $_.CommandLine -like $script -and $_.CommandLine -like $players -and
+        (!$env:RB_AGENT -or $_.CommandLine -match ('-Agent\\s+"?' + $env:RB_AGENT + '"?(\\s|$)'))
       } | Select-Object -ExpandProperty ProcessId)
     foreach ($id in $ids) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }`;
   try {
@@ -158,7 +163,7 @@ export function sweepPlayers() {
       stdio: 'ignore',
       windowsHide: true,
       timeout: 8000,
-      env: { ...process.env, RB_SCRIPT: STREAM_SCRIPT, RB_PLAYERS_DIR: PLAYERS_DIR },
+      env: { ...process.env, RB_SCRIPT: STREAM_SCRIPT, RB_PLAYERS_DIR: PLAYERS_DIR, RB_AGENT: agent || '' },
     });
   } catch {
     // best effort

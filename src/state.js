@@ -11,6 +11,7 @@ import {
 import path from 'node:path';
 import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS } from './config.js';
 import { PROVIDER_IDS } from './providers/index.js';
+import { migrateConfig } from './providers/inworld.js';
 import { log } from './log.js';
 
 // Fields that describe what is happening RIGHT NOW rather than what you chose.
@@ -275,6 +276,17 @@ function normalize(parsed) {
   delete s.expression;
   delete s.encoding;
   delete s.sampleRateHertz;
+  s.inworld = migrateConfig(s.inworld);
+  s.agents = Object.fromEntries(['claude', 'codex'].map((agent) => {
+    const saved = parsed.agents?.[agent];
+    const p = saved && typeof saved === 'object' ? saved : {};
+    return [agent, {
+      enabled: p.enabled === undefined ? true : p.enabled === true,
+      provider: PROVIDER_IDS.includes(p.provider) ? p.provider : s.provider,
+      inworld: migrateConfig({ ...s.inworld, ...(p.inworld || {}) }),
+      elevenlabs: { ...s.elevenlabs, ...(p.elevenlabs || {}) },
+    }];
+  }));
   return s;
 }
 
@@ -332,8 +344,12 @@ export function writeState(patch) {
       // default shape, never to a bare {}: merging a patch onto {} would write
       // a file containing only that patch, silently dropping the provider, the
       // voice, the tuning and even `enabled` itself.
-      const current = readSettingsFile() || normalize({});
+      const current = normalize(readSettingsFile() || {});
       const next = { ...current, ...settingsPatch, updatedAt: new Date().toISOString() };
+      // Old clients edit Claude's provider fields. Keep Codex's snapshot intact.
+      for (const k of ['provider', ...PROVIDER_IDS]) {
+        if (settingsPatch[k] !== undefined) next.agents.claude[k] = settingsPatch[k];
+      }
       for (const k of RUNTIME_KEYS) delete next[k];
       for (const [k, v] of Object.entries(settingsPatch)) if (v === undefined) delete next[k];
       // Voice on/off is the one setting worth an audit trail. When it changes,
@@ -361,7 +377,38 @@ export function activeConfig(state) {
 
 // Merge a patch into one provider's nested config block.
 export function updateProviderConfig(provider, patch) {
-  const current = readState();
-  const block = { ...(current[provider] || {}), ...patch };
-  return writeState({ [provider]: block });
+  return writeAgentState('claude', { [provider]: patch });
+}
+
+export const AGENTS = ['claude', 'codex'];
+export function agentState(state, agent = 'claude') {
+  if (!AGENTS.includes(agent)) throw new Error('unknown agent');
+  const profile = state.agents[agent];
+  return { ...state, ...profile, agent, masterEnabled: state.enabled,
+    agentEnabled: profile.enabled, enabled: state.enabled && profile.enabled };
+}
+export function readAgentState(agent = 'claude') { return agentState(readState(), agent); }
+
+// Merge individual leaves INSIDE the same cross-process settings lock. A late
+// slider save must never restore an old master mute, source mute or other tab.
+export function writeAgentState(agent, patch) {
+  if (!AGENTS.includes(agent)) throw new Error('unknown agent');
+  ensureStateDir();
+  withSettingsLock(() => {
+    const next = normalize(readSettingsFile() || {});
+    const p = next.agents[agent];
+    if ('enabled' in patch) p.enabled = patch.enabled === true;
+    if (PROVIDER_IDS.includes(patch.provider)) p.provider = patch.provider;
+    for (const provider of PROVIDER_IDS) {
+      if (patch[provider]) p[provider] = { ...p[provider], ...patch[provider] };
+    }
+    p.inworld = migrateConfig(p.inworld);
+    if (agent === 'claude') {
+      for (const k of ['provider', ...PROVIDER_IDS]) next[k] = p[k];
+    }
+    next.updatedAt = new Date().toISOString();
+    for (const k of RUNTIME_KEYS) delete next[k];
+    writeAtomic(next);
+  });
+  return readState();
 }

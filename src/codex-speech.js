@@ -1,4 +1,4 @@
-import { readState, writeState, activeConfig } from './state.js';
+import { readAgentState, writeState, activeConfig } from './state.js';
 import { stripForSpeech, truncateForSpeech } from './tts.js';
 import { speak } from './speak.js';
 import { claim, cleanOldClaims } from './claims.js';
@@ -11,7 +11,7 @@ import { log } from './log.js';
 export async function speakCodexReply(payload, playback = speak) {
   const reply = codexReply(payload);
   if (!reply) return { skipped: 'not a main-thread reply' };
-  const st = readState();
+  const st = readAgentState('codex');
   if (!st.enabled) return { skipped: 'voice off' };
   const clean = truncateForSpeech(stripForSpeech(stripCodexMetadata(reply.text)), st.maxChars);
   if (clean.length < 2) return { skipped: 'nothing speakable' };

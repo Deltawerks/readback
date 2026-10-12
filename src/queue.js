@@ -30,9 +30,10 @@ function ensureQueueDir() {
 
 // The current "epoch". A hard stop (voice off / stop button / a manual utterance
 // taking over) stamps a new value; waiters that captured an older value give up.
-export function currentEpoch() {
+export function currentEpoch(agent) {
+  const file = agent === 'claude' || agent === 'codex' ? `${EPOCH_FILE}-${agent}` : EPOCH_FILE;
   try {
-    return readFileSync(EPOCH_FILE, 'utf8').trim();
+    return readFileSync(file, 'utf8').trim();
   } catch {
     return '0';
   }
@@ -41,11 +42,12 @@ export function currentEpoch() {
 // Tell every waiter to abandon its wait: the user asked for silence, or a
 // manual utterance is jumping the line. Strictly monotonic, so even two flushes
 // in the same millisecond still register as a change to a waiter.
-export function flushQueue() {
+export function flushQueue(agent) {
   ensureQueueDir();
+  const file = agent === 'claude' || agent === 'codex' ? `${EPOCH_FILE}-${agent}` : EPOCH_FILE;
   try {
-    const prev = Number(currentEpoch()) || 0;
-    writeFileSync(EPOCH_FILE, String(Math.max(Date.now(), prev + 1)));
+    const prev = Number(currentEpoch(agent)) || 0;
+    writeFileSync(file, String(Math.max(Date.now(), prev + 1)));
   } catch {
     // best effort. A stale epoch just means a waiter starts instead of aborting
   }

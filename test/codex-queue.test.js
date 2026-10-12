@@ -16,7 +16,7 @@ test('real Claude and Codex hook workers share one queue with no overlapping pla
   mkdirSync(state);
   mkdirSync(cache);
   const settings = path.join(state, 'state.json');
-  writeFileSync(settings, JSON.stringify({ enabled: true, provider: 'inworld' }));
+  writeFileSync(settings, JSON.stringify({ enabled: true, provider: 'inworld', agents: { claude: { inworld: {voiceId:'ClaudeVoice'} }, codex: { inworld: {voiceId:'CodexVoice'} } } }));
   const before = readFileSync(settings, 'utf8');
   const events = path.join(dir, 'events.jsonl');
   const preload = path.join(dir, 'fixture.cjs');
@@ -40,7 +40,7 @@ test('real Claude and Codex hook workers share one queue with no overlapping pla
     syncBuiltinESMExports();
     globalThis.fetch = async (url, init) => {
       if (String(url) !== 'https://api.inworld.ai/tts/v1/voice') throw new Error('unexpected network request');
-      record({event:'synthesize', text:JSON.parse(init.body).text});
+      record({event:'synthesize', text:JSON.parse(init.body).text, voice:JSON.parse(init.body).voiceId});
       return new Response(JSON.stringify({audioContent:Buffer.from('fixture audio').toString('base64')}));
     };
   `);
@@ -82,6 +82,7 @@ test('real Claude and Codex hook workers share one queue with no overlapping pla
   assert.equal(active, 0);
   const texts = all.filter((e) => e.event === 'synthesize').map((e) => e.text);
   assert.equal(texts[0], 'Claude reply.');
+  assert.deepEqual(all.filter(e => e.event === 'synthesize').map(e => e.voice), ['ClaudeVoice', 'CodexVoice', 'CodexVoice']);
   assert.deepEqual(texts.slice(1).sort(), ['Codex reply.', 'Other chat reply.']);
   assert.equal(readFileSync(settings, 'utf8'), before, 'workers must not change saved voice settings');
 });

@@ -16,11 +16,11 @@ import {
 // that overlaps this one. Kills every player whose marker is live and whose
 // identity checks out (see players.js), then sweeps by exact command line for
 // any player that never got a marker.
-export function stopPlayback() {
-  const players = livePlayers();
+export function stopPlayback(agent) {
+  const players = livePlayers().filter((p) => !agent || p.agent === agent);
   killPlayers(players);
   for (const p of players) forgetPlayer(p.pid);
-  sweepPlayers();
+  sweepPlayers(agent);
   try {
     writeState({ lastPid: null });
   } catch {
@@ -99,7 +99,7 @@ export function writeEndMarker(dir, count) {
 // silently fails to run). Returns the child; the caller either unref()s it
 // (long-lived parent) or awaits its 'close' (short-lived parent). The player
 // is told where the markers live so it can keep its own marker fresh.
-export function spawnStreamPlayer(dir) {
+export function spawnStreamPlayer(dir, agent = 'claude') {
   const player = spawn(
     'powershell',
     [
@@ -114,11 +114,13 @@ export function spawnStreamPlayer(dir) {
       dir,
       '-PlayersDir',
       PLAYERS_DIR,
+      '-Agent',
+      agent,
     ],
     { stdio: 'ignore', windowsHide: true }
   );
   try {
-    recordPlayer(player.pid);
+    recordPlayer(player.pid, agent);
   } catch {
     // best effort; sweepPlayers() is the backstop if we couldn't record it
   }

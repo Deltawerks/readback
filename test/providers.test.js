@@ -72,7 +72,7 @@ test('the Inworld model fallback matches the declared default', async (t) => {
   const calls = queueFetch(t, [INWORLD_OK]);
   await inworld.synthesize('hi', { voiceId: 'Luna' }, 'key');
   assert.equal(calls[0].body.modelId, inworld.defaults.modelId);
-  assert.equal(calls[0].body.modelId, 'inworld-tts-1.5-mini');
+  assert.equal(calls[0].body.modelId, 'inworld-tts-2-flash');
 });
 
 // I12: ElevenLabs documents speed, similarity and speaker boost as unavailable
@@ -172,15 +172,23 @@ test('ElevenLabs clamps stability, similarity and style', async (t) => {
   assert.equal(vs.speed, 1.2);
 });
 
-test('Inworld clamps temperature and speed', async (t) => {
+test('Flash sends speed without obsolete temperature or flagship delivery', async (t) => {
   const calls = queueFetch(t, [INWORLD_OK]);
-  await inworld.synthesize('hi', { voiceId: 'Luna', temperature: 9, speed: 12 }, 'key');
-  assert.equal(calls[0].body.temperature, 2);
+  await inworld.synthesize('hi', { voiceId: 'Vinny', temperature: 9, deliveryMode: 'CREATIVE', speed: 12 }, 'key');
+  assert.equal(calls[0].body.modelId, 'inworld-tts-2-flash');
+  assert.equal(calls[0].body.voiceId, 'Vinny');
+  assert.equal(calls[0].body.temperature, undefined);
+  assert.equal(calls[0].body.deliveryMode, undefined);
   assert.equal(calls[0].body.audioConfig.speakingRate, 1.5);
+});
 
-  const more = queueFetch(t, [INWORLD_OK]);
-  await inworld.synthesize('hi', { voiceId: 'Luna', temperature: 'hot' }, 'key');
-  assert.equal(more[0].body.temperature, inworld.defaults.temperature);
+test('flagship uses validated deliveryMode, never temperature', async (t) => {
+  const calls = queueFetch(t, [INWORLD_OK]);
+  for (const deliveryMode of ['STABLE', 'BALANCED', 'CREATIVE', 'invalid']) {
+    await inworld.synthesize('hi', { modelId: 'inworld-tts-2', deliveryMode, temperature: 1.3 }, 'key');
+  }
+  assert.deepEqual(calls.map(c => c.body.deliveryMode), ['STABLE', 'BALANCED', 'CREATIVE', 'BALANCED']);
+  assert.ok(calls.every(c => !('temperature' in c.body)));
 });
 
 // M8: the panel takes numbers from sliders, but a POST can carry anything.
@@ -200,8 +208,8 @@ test('clampKnobs coerces every knob the provider declares', () => {
   assert.equal(clampKnobs('elevenlabs', { speakerBoost: 'false' }).speakerBoost, false);
   assert.equal(clampKnobs('elevenlabs', { speakerBoost: 0 }).speakerBoost, false);
 
-  const iw = clampKnobs('inworld', { temperature: 99, speed: '1.2' });
-  assert.equal(iw.temperature, 2);
+  const iw = clampKnobs('inworld', { deliveryMode: 'nonsense', speed: '1.2' });
+  assert.equal(iw.deliveryMode, 'BALANCED');
   assert.equal(iw.speed, 1.2);
 });
 
@@ -221,5 +229,5 @@ test('clampKnobs only touches what the patch carries', () => {
   assert.deepEqual(clampKnobs('inworld', {}), {});
   assert.deepEqual(clampKnobs('inworld', { speed: 1.1 }), { speed: 1.1 });
   // An unknown provider resolves the same way getProvider does.
-  assert.deepEqual(clampKnobs('nope', { temperature: 99 }), { temperature: 2 });
+  assert.deepEqual(clampKnobs('nope', { deliveryMode: 'bad' }), { deliveryMode: 'BALANCED' });
 });

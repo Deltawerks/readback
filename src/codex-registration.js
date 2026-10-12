@@ -23,6 +23,6 @@ export function codexRegistration(root, nodePath = process.execPath) {
       }] }],
     },
   };
-  const mcpToml = `[mcp_servers.readback]\ncommand = ${JSON.stringify(nodePath)}\nargs = [${JSON.stringify(mcp)}]\n`;
+  const mcpToml = `[mcp_servers.readback]\ncommand = ${JSON.stringify(nodePath)}\nargs = [${JSON.stringify(mcp)}]\nenv = { READBACK_SOURCE = "codex" }\n`;
   return { hooks, mcpToml, hook, mcp };
 }
