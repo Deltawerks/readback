@@ -1,8 +1,8 @@
 {
   "name": "readback",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "type": "module",
-  "description": "Windows-first, dual-provider (Inworld + ElevenLabs) voice output for Claude Code. Reads Claude's replies aloud, tuned from a GUI panel.",
+  "description": "Windows voice for Claude Code and Codex. Automatically reads replies aloud with Inworld or ElevenLabs, a shared queue, and a GUI control panel.",
   "license": "MIT",
   "bin": {
     "readback-mcp": "src/mcp-server.js"
@@ -14,6 +14,7 @@
     "voices": "node scripts/voices.js",
     "where": "node scripts/where.js",
     "register": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/register.ps1",
+    "register:codex": "node scripts/register-codex.js",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
     "test": "node --test"
   },

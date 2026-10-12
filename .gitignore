@@ -8,6 +8,8 @@ node_modules/
 *.log
 .mcp.json
 hooks-snippet.json
+codex-hooks-snippet.json
+codex-mcp-snippet.toml
 assets/readback.ico
 assets/voicebox.ico
 .claude/launch.json

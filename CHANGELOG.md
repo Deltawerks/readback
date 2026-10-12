@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- **Codex auto-speak:** a dedicated `Stop` hook accepts the finished reply from
+  Codex and sends it to ReadBack's existing automatic speech queue. Claude and
+  Codex share the saved voice, master switch and queue; duplicate Codex hook
+  delivery is claimed once per session/turn. No Codex transcript scraping.
+- `npm run register:codex` generates hook and optional MCP snippets without
+  changing either assistant's configuration or ReadBack settings. The setup
+  guide includes hook trust, shared controls and rollback instructions.
+- Codex-only cleanup skips app directives and citation metadata when speaking.
+- The panel now says **Voice for Claude & Codex**. The ReadBack name stays.
+
+### Compatibility
+
+- Local Windows Codex chats with lifecycle-hook support. Remote/cloud execution
+  is not supported. Codex hooks must be reviewed and trusted by the user.
+- Claude's hook/parser, settings persistence, provider integration, queue and
+  audio player are unchanged. There is no settings migration or new API key.
+
 ## 0.5.2
 
 ### Fixed
