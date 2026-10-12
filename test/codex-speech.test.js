@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -12,9 +12,15 @@ process.env.READBACK_CACHE_DIR = path.join(dir, 'cache');
 const { speakCodexReply } = await import('../src/codex-speech.js');
 const { readState, writeState } = await import('../src/state.js');
 const { STATE_FILE, RUNTIME_FILE } = await import('../src/config.js');
-const event = (turn = 'turn-1', text = 'Read this reply.') => ({
-  hook_event_name: 'Stop', session_id: 'test-session', turn_id: turn, last_assistant_message: text,
-});
+const event = (turn = 'turn-1', text = 'Read this reply.') => {
+  const transcript = path.join(dir, turn + '.jsonl');
+  writeFileSync(transcript, [
+    { type: 'session_meta', payload: { id: 'test-session', source: 'vscode', thread_source: 'user' } },
+    { type: 'event_msg', payload: { type: 'task_started', turn_id: turn, turn_attribution: { turn_trigger: 'composer' } } },
+  ].map(JSON.stringify).join('\n'));
+  return { hook_event_name: 'Stop', session_id: 'test-session', turn_id: turn,
+    transcript_path: transcript, last_assistant_message: text };
+};
 
 test('Codex uses automatic queued playback and never rewrites saved settings', async () => {
   writeState({ enabled: true, provider: 'inworld' });
@@ -77,4 +83,19 @@ test('Codex hook acknowledges malformed and muted events without changing turn f
     assert.equal(child.stderr, '');
   }
   assert.equal(readState().enabled, false);
+});
+
+test('background suggestions cannot synthesize or claim speech', async () => {
+  writeState({ enabled: true });
+  const payload = event('suggestion-turn');
+  const before = readFileSync(STATE_FILE, 'utf8');
+  for (const transcript_path of [null, '', path.join(dir, 'absent.jsonl')]) {
+    const result = await speakCodexReply({ ...payload, transcript_path }, () => assert.fail('background speech'));
+    assert.ok(result.skipped);
+  }
+  // Rejected provenance must not consume the real turn's claim.
+  let called = false;
+  await speakCodexReply(payload, async () => { called = true; return { spoken: 1, total: 1 }; });
+  assert.ok(called);
+  assert.equal(readFileSync(STATE_FILE, 'utf8'), before);
 });

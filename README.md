@@ -265,3 +265,9 @@ acts as a backstop rather than clipping normal replies. Set
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+### Codex background turns and panel lifetime
+
+Automatic Codex speech requires a saved main-chat transcript containing the matching turn. Composer predictions (the gray suggested next message), subagents, ephemeral sessions, and turns whose origin cannot be verified stay silent. The hook still uses `last_assistant_message` for spoken text. This guard reads Codex's current transcript metadata because the Stop payload does not expose the turn trigger; future metadata changes may require a compatibility update. Manual MCP speech remains available.
+
+The Windows shortcut uses `scripts/launch-panel.ps1` through the hidden VBS launcher. It verifies ReadBack's health endpoint and starts the panel through WMI so the server survives closing the app or terminal that launched it. To start it without opening a browser, run `powershell -NoProfile -File scripts/launch-panel.ps1 -NoOpen`. A raw `npm run panel` remains tied to the terminal that runs it.

@@ -11,9 +11,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { codexRegistration } from '../src/codex-registration.js';
-import { codexReply } from '../src/codex.js';
+import { codexReply, codexTurnEligibility } from '../src/codex.js';
 
-test('installed Codex delivers its Stop payload through the generated Windows command', {
+for (const ephemeral of [false, true]) test(`installed Codex Stop provenance: ephemeral=${ephemeral}`, {
   skip: !process.env.READBACK_CODEX_BIN || process.platform !== 'win32', timeout: 45000,
 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'readback-runtime-'));
@@ -72,7 +72,7 @@ supports_websockets = false
   let timer;
   try {
     child = spawn(process.env.READBACK_CODEX_BIN, [
-      'exec', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
+      'exec', '--skip-git-repo-check', ...(ephemeral ? ['--ephemeral'] : []), '--sandbox', 'read-only',
       // This one invocation contains only the vetted fixture hook above. Never
       // use this flag in the user's actual installation or generated config.
       '--dangerously-bypass-hook-trust', '--json', 'Return the fixture response.',
@@ -90,6 +90,8 @@ supports_websockets = false
     assert.ok(existsSync(capture), `Stop did not run: ${output}`);
     const payload = JSON.parse(readFileSync(capture, 'utf8'));
     assert.equal(codexReply(payload)?.text, reply);
+    const eligibility = await codexTurnEligibility(payload);
+    assert.equal(eligibility.allowed, !ephemeral, JSON.stringify({eligibility, payload}));
     const ran = JSON.parse(readFileSync(result, 'utf8'));
     assert.equal(ran.status, 0, ran.stderr);
     assert.deepEqual(JSON.parse(ran.stdout), {});

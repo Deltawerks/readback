@@ -24,6 +24,7 @@ try {
         hook_event_name: 'Stop',
         session_id: payload.session_id,
         turn_id: payload.turn_id,
+        transcript_path: payload.transcript_path,
         last_assistant_message: reply.text,
       }), resolve);
     });

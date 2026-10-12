@@ -2,7 +2,7 @@ import { readAgentState, writeState, activeConfig } from './state.js';
 import { stripForSpeech, truncateForSpeech } from './tts.js';
 import { speak } from './speak.js';
 import { claim, cleanOldClaims } from './claims.js';
-import { codexReply, stripCodexMetadata } from './codex.js';
+import { codexReply, stripCodexMetadata, codexTurnEligibility } from './codex.js';
 import { log } from './log.js';
 
 // Uses the SAME queue, cancellation epoch, settings and player as Claude. The
@@ -13,6 +13,11 @@ export async function speakCodexReply(payload, playback = speak) {
   if (!reply) return { skipped: 'not a main-thread reply' };
   const st = readAgentState('codex');
   if (!st.enabled) return { skipped: 'voice off' };
+  const eligibility = await codexTurnEligibility(payload);
+  if (!eligibility.allowed) {
+    log(`codex-worker: skipped ${eligibility.reason}`);
+    return { skipped: eligibility.reason };
+  }
   const clean = truncateForSpeech(stripForSpeech(stripCodexMetadata(reply.text)), st.maxChars);
   if (clean.length < 2) return { skipped: 'nothing speakable' };
   if (!claim(reply.id)) return { skipped: 'already claimed' };

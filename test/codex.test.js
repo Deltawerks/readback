@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { Readable } from 'node:stream';
-import { codexReply, stripCodexMetadata, readHookInput } from '../src/codex.js';
+import { codexReply, stripCodexMetadata, readHookInput, codexTurnEligibility } from '../src/codex.js';
 import { codexRegistration } from '../src/codex-registration.js';
 
 const event = (patch = {}) => ({
@@ -68,4 +71,25 @@ test('Codex registration quotes paths and keeps the hook separate from MCP contr
   assert.ok(script.endsWith("codex-stop-hook.js'"));
   assert.ok(config.mcpToml.includes('[mcp_servers.readback]'));
   assert.ok(!config.mcpToml.includes('enabled = true'));
+});
+
+test('speech provenance rejects predictions, subagents, wrong sessions and unmatched turns', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-provenance-'));
+  const file = path.join(dir, 'turns.jsonl');
+  const check = async (session, turn) => {
+    writeFileSync(file, [
+      { type: 'session_meta', payload: { id: 'session-1', source: 'vscode', thread_source: 'user', ...session } },
+      { type: 'event_msg', payload: { type: 'task_started', turn_id: 'turn-1', ...turn } },
+    ].map(JSON.stringify).join('\n'));
+    return (await codexTurnEligibility(event({transcript_path:file}))).allowed;
+  };
+  assert.equal(await check({}, {turn_attribution:{turn_trigger:'composer'}}), true);
+  assert.equal(await check({}, {turn_attribution:{turn_trigger:'composer_predictions'}}), false);
+  assert.equal(await check({}, {turn_attribution:{turn_trigger:'unknown_background'}}), false);
+  assert.equal(await check({}, {turn_attribution:{turn_trigger:'composer',initiating_agent_path:'/root/child'}}), false);
+  assert.equal(await check({id:'different-session'}, {}), false);
+  assert.equal(await check({thread_source:'guardian_review'}, {}), false);
+  assert.equal(await check({source:{subagent:{parent_thread_id:'parent'}}}, {}), false);
+  assert.equal(await check({}, {turn_id:'earlier-turn'}), false);
+  assert.equal((await codexTurnEligibility(event({transcript_path:null}))).allowed, false);
 });

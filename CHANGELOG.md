@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Ignore Codex composer predictions and other unverified/background Stop events using matching session/turn metadata.
+- Launch the Windows panel shortcut outside the calling app job so closing Codex does not terminate the panel.
+
+
 ## 0.6.0
 
 ### Added

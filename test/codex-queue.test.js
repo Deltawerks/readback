@@ -67,10 +67,18 @@ test('real Claude and Codex hook workers share one queue with no overlapping pla
   ].map(JSON.stringify).join('\n'));
   run('stop-hook.js', { transcript_path: transcript });
   await waitFor(() => readEvents().some((e) => e.event === 'start'));
-  const codex = { hook_event_name: 'Stop', session_id: 'codex-session', turn_id: 'one', last_assistant_message: 'Codex reply.' };
+  const codexTranscript = (session) => {
+    const file = path.join(dir, session + '.jsonl');
+    writeFileSync(file, [
+      {type:'session_meta',payload:{id:session,source:'vscode',thread_source:'user'}},
+      {type:'event_msg',payload:{type:'task_started',turn_id:'one',turn_attribution:{turn_trigger:'composer'}}},
+    ].map(JSON.stringify).join('\n'));
+    return file;
+  };
+  const codex = { transcript_path: codexTranscript('codex-session'), hook_event_name: 'Stop', session_id: 'codex-session', turn_id: 'one', last_assistant_message: 'Codex reply.' };
   run('codex-stop-hook.js', codex);
   run('codex-stop-hook.js', codex); // duplicate while the first is waiting
-  run('codex-stop-hook.js', { ...codex, session_id: 'another-session', last_assistant_message: 'Other chat reply.' });
+  run('codex-stop-hook.js', { ...codex, transcript_path: codexTranscript('another-session'), session_id: 'another-session', last_assistant_message: 'Other chat reply.' });
   await waitFor(() => readEvents().filter((e) => e.event === 'end').length === 3);
   const all = readEvents();
   let active = 0;
