@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { createInterface } from 'node:readline';
+import { open } from 'node:fs/promises';
 
 // Validate the documented Stop envelope before checking its turn provenance.
 export function codexReply(payload) {
@@ -16,38 +15,91 @@ export function codexReply(payload) {
   return { id, text: text.slice(0, 200000) };
 }
 
+const TRANSCRIPT_BLOCK = 256 * 1024;
+const MAX_TURN_RECORD = 1024 * 1024;
+const MAX_SESSION_RECORD = 8 * 1024 * 1024;
+
+async function sessionRecord(file, size) {
+  const parts = [];
+  let offset = 0;
+  while (offset < size && offset < MAX_SESSION_RECORD) {
+    const block = Buffer.alloc(Math.min(TRANSCRIPT_BLOCK, size - offset, MAX_SESSION_RECORD - offset));
+    const { bytesRead } = await file.read(block, 0, block.length, offset);
+    if (!bytesRead) break;
+    const bytes = block.subarray(0, bytesRead);
+    const newline = bytes.indexOf(10);
+    parts.push(newline < 0 ? bytes : bytes.subarray(0, newline));
+    offset += bytesRead;
+    if (newline >= 0 || offset === size) return JSON.parse(Buffer.concat(parts).toString('utf8'));
+  }
+  throw new Error('session metadata unavailable');
+}
+
+// Read newest lines first without loading the transcript or its giant tool /
+// compaction records into memory. Carry bytes across blocks (not decoded text)
+// so UTF-8 characters and JSON records crossing a block boundary remain intact.
+// Oversized individual lines are skipped; there is no total-file-size cutoff.
+async function* newestTranscriptLines(file, size) {
+  let offset = size;
+  let carry = Buffer.alloc(0);
+  let oversized = false;
+  while (offset > 0) {
+    const length = Math.min(TRANSCRIPT_BLOCK, offset);
+    offset -= length;
+    const block = Buffer.alloc(length);
+    const { bytesRead } = await file.read(block, 0, length, offset);
+    if (bytesRead !== length) throw new Error('transcript changed while reading');
+    let end = bytesRead;
+    for (let newline = block.lastIndexOf(10, end - 1); newline >= 0;
+         newline = end > 0 ? block.lastIndexOf(10, end - 1) : -1) {
+      const piece = block.subarray(newline + 1, end);
+      if (!oversized && piece.length + carry.length <= MAX_TURN_RECORD) {
+        yield Buffer.concat([piece, carry]).toString('utf8');
+      }
+      carry = Buffer.alloc(0);
+      oversized = false;
+      end = newline;
+    }
+    if (!oversized && end + carry.length <= MAX_TURN_RECORD) {
+      carry = Buffer.concat([block.subarray(0, end), carry]);
+    } else {
+      carry = Buffer.alloc(0);
+      oversized = true;
+    }
+  }
+  if (!oversized && carry.length) yield carry.toString('utf8');
+}
+
 // Desktop composer predictions also fire Stop, but run in ephemeral forks.
-// Stop currently has no turn-trigger field, so require a matching persisted
-// main-session turn. Fail silent when provenance is absent/unknown; never infer
-// whether a message is a suggestion from its prose. Read metadata only, not
-// assistant text (the documented last_assistant_message remains the speech).
+// Check the session identity at the beginning, then seek the matching turn from
+// the end. Long-lived chats can be gigabytes; their newest turn must not be
+// rejected just because older history exceeds a forward scan's byte budget.
 export async function codexTurnEligibility(payload) {
   if (typeof payload?.transcript_path !== 'string' || !payload.transcript_path) {
     return { allowed: false, reason: 'no persisted chat transcript' };
   }
-  const input = createReadStream(payload.transcript_path, { encoding: 'utf8' });
-  const lines = createInterface({ input, crlfDelay: Infinity });
-  const timer = setTimeout(() => input.destroy(new Error('metadata read timeout')), 5000);
-  let sessionMatches = false;
+  let file;
   try {
-    for await (const line of lines) {
-      if (input.bytesRead > 128 * 1024 * 1024) break;
-      if (!/"type"\s*:\s*"(?:session_meta|event_msg)"/.test(line)) continue;
-      let record;
-      try { record = JSON.parse(line); } catch { continue; }
-      const meta = record.payload;
-      if (record.type === 'session_meta') {
-        sessionMatches = (meta?.id ?? meta?.session_id) === payload.session_id;
-        if (!sessionMatches || (meta.thread_source && meta.thread_source !== 'user') ||
-            (typeof meta.source === 'object' && meta.source !== null)) {
-          return { allowed: false, reason: 'not a main chat session' };
-        }
-      }
-      if (record.type !== 'event_msg' || meta?.type !== 'task_started' ||
-          meta.turn_id !== payload.turn_id) continue;
-      const attribution = meta.turn_attribution;
+    file = await open(payload.transcript_path, 'r');
+    const stat = await file.stat();
+    if (!stat.isFile()) return { allowed: false, reason: 'chat transcript unavailable' };
+    const record = await sessionRecord(file, stat.size);
+    const meta = record.payload;
+    if (record.type !== 'session_meta' || !meta ||
+        (meta.id ?? meta.session_id) !== payload.session_id ||
+        (meta.thread_source && meta.thread_source !== 'user') ||
+        (typeof meta.source === 'object' && meta.source !== null)) {
+      return { allowed: false, reason: 'not a main chat session' };
+    }
+    for await (const line of newestTranscriptLines(file, stat.size)) {
+      if (!/"type"\s*:\s*"event_msg"/.test(line) || !line.includes(payload.turn_id)) continue;
+      let event;
+      try { event = JSON.parse(line); } catch { continue; }
+      const turn = event.payload;
+      if (event.type !== 'event_msg' || turn?.type !== 'task_started' || turn.turn_id !== payload.turn_id) continue;
+      const attribution = turn.turn_attribution;
       const trigger = attribution?.turn_trigger;
-      if (!sessionMatches || attribution?.initiating_agent_path ||
+      if (attribution?.initiating_agent_path ||
           (trigger != null && !['composer', 'cli', 'exec'].includes(trigger))) {
         return { allowed: false, reason: 'background or unverified turn' };
       }
@@ -57,9 +109,7 @@ export async function codexTurnEligibility(payload) {
   } catch {
     return { allowed: false, reason: 'chat transcript unavailable' };
   } finally {
-    clearTimeout(timer);
-    lines.close();
-    input.destroy();
+    await file?.close();
   }
 }
 

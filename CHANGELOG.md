@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+- Fix silent Codex replies in long-running chats whose transcripts exceed 128 MB. Verify session identity at the beginning and search backward for the matching turn, with bounded memory and no total-file-size cutoff.
+- Preserve background-suggestion and subagent filtering. Add regression coverage for large histories, oversized records, and UTF-8/read-boundary handling.
+
 ## 0.6.2
 
 - Launch Codex speech workers outside the Windows hook job so turn cleanup cannot cut off playback. Preserve worker environment in memory and consume reply input from a single-use private cache file.

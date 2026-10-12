@@ -28,7 +28,8 @@ desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
 > Inworld, or ElevenLabs.
 
 **Already using it?** The 0.6 release adds Codex and independent agent profiles;
-0.6.2 also protects Codex playback from end-of-turn cleanup. Existing
+0.6.2 protects Codex playback from end-of-turn cleanup, and 0.6.3 fixes speech in
+long-running Codex chats with large transcripts. Existing
 voices and speeds seed both profiles; deprecated Inworld models move to TTS-2
 Flash. The saved master mute and provider keys are preserved. See
 the [changelog](CHANGELOG.md) and the Codex setup below.
@@ -219,6 +220,9 @@ terminal that runs it.
 Composer predictions (the gray suggested next message), subagents, ephemeral
 sessions, and turns whose origin cannot be verified stay silent. Automatic Codex
 speech requires a saved main-chat transcript with the matching session and turn.
+ReadBack checks the session header and searches backward from the newest records,
+so accumulated chat history has no total-size cutoff. Window focus is not used
+to decide whether a reply should speak.
 The spoken text still comes from the Stop event's `last_assistant_message`.
 The provenance check uses current transcript metadata because Stop does not
 expose the turn trigger; future Codex metadata changes may need a compatibility
