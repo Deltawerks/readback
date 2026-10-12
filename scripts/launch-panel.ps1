@@ -1,7 +1,7 @@
 param([switch]$NoOpen)
 $ErrorActionPreference = 'Stop'
 $projDir = Split-Path -Parent $PSScriptRoot
-$baseUrl = 'http://localhost:7717/'
+$baseUrl = 'http://127.0.0.1:7717/'
 function Get-ReadbackHealth {
   try {
     $health = Invoke-RestMethod ($baseUrl + 'health') -TimeoutSec 2

@@ -111,8 +111,8 @@ Claude Code**, say "voice on", and the next reply should speak.
 
 Use a current Codex desktop/CLI version with lifecycle hooks. ReadBack uses the
 documented `Stop` event and its `last_assistant_message`, `session_id` and
-`turn_id` fields. It does not scrape the screen or read Codex's private transcript
-format. See [OpenAI's hook documentation](https://learn.chatgpt.com/docs/hooks).
+`turn_id` fields for speech. It checks matching session/turn metadata in the saved
+transcript to exclude background suggestions; it does not scrape the screen. See [OpenAI's hook documentation](https://learn.chatgpt.com/docs/hooks).
 
 ```powershell
 npm run register:codex
