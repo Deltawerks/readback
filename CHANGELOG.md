@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2
+
+- Launch Codex speech workers outside the Windows hook job so turn cleanup cannot cut off playback. Preserve worker environment in memory and consume reply input from a single-use private cache file.
+- Add a real Windows job-termination regression test alongside shared-queue and mute coverage.
+
 ## 0.6.1
 
 - Ignore Codex composer predictions and other unverified/background Stop events using matching session/turn metadata.

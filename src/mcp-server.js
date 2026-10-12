@@ -14,7 +14,7 @@ const SOURCE = process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'claude';
 const readState = () => readAgentState(SOURCE);
 const updateProviderConfig = (provider, patch) => writeAgentState(SOURCE, { [provider]: patch });
 
-const server = new McpServer({ name: 'readback', version: '0.6.1' });
+const server = new McpServer({ name: 'readback', version: '0.6.2' });
 
 function summarize(st) {
   const c = activeConfig(st);

@@ -1,6 +1,6 @@
 {
   "name": "readback",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "type": "module",
   "description": "Windows voice for Claude Code and Codex. Automatically reads replies aloud with Inworld or ElevenLabs, a shared queue, and a GUI control panel.",
   "license": "MIT",

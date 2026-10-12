@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -93,4 +93,5 @@ test('real Claude and Codex hook workers share one queue with no overlapping pla
   assert.deepEqual(all.filter(e => e.event === 'synthesize').map(e => e.voice), ['ClaudeVoice', 'CodexVoice', 'CodexVoice']);
   assert.deepEqual(texts.slice(1).sort(), ['Codex reply.', 'Other chat reply.']);
   assert.equal(readFileSync(settings, 'utf8'), before, 'workers must not change saved voice settings');
+  assert.equal(readdirSync(cache).filter(f => f.startsWith('codex-input-')).length, 0, 'single-use reply files must be consumed');
 });
