@@ -1,9 +1,12 @@
 # Readback
 
-**Voice for Claude Code and Codex.** Flip it on and your assistant reads its replies aloud,
+**Voice for Claude and Codex.** Flip it on and your assistant reads its replies aloud,
 so you can rest your eyes or keep half an ear on a long run instead of watching
 the terminal scroll. Flip it off and it stops immediately, mid-sentence if the
 phone rings.
+
+Works with Claude Code (including inside Claude Desktop) and local Codex
+desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
 
 <p align="center">
   <img src="img/readback-profiles.jpg" alt="Readback control panel" width="420" />
@@ -24,7 +27,8 @@ phone rings.
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic, OpenAI,
 > Inworld, or ElevenLabs.
 
-**Already using it?** 0.6.0 adds Codex and independent agent profiles. Existing
+**Already using it?** The 0.6 release adds Codex and independent agent profiles;
+0.6.2 also protects Codex playback from end-of-turn cleanup. Existing
 voices and speeds seed both profiles; deprecated Inworld models move to TTS-2
 Flash. The saved master mute and provider keys are preserved. See
 the [changelog](CHANGELOG.md) and the Codex setup below.
@@ -33,13 +37,13 @@ the [changelog](CHANGELOG.md) and the Codex setup below.
 
 ## How it works
 
-Three cooperating pieces sharing one state file:
+Three cooperating pieces sharing saved settings and one speech queue:
 
 | Piece | Role |
 |------|------|
 | **MCP server** | in-chat toggle: `voice_on` / `voice_off` / `set_provider` / `set_voice` / `say` / `list_voices` |
 | **Stop hook** | the actual voice: auto-speaks each reply while enabled |
-| **Control panel** | `localhost:7717` web cockpit for provider / voice / model / tuning + live preview |
+| **Control panel** | `127.0.0.1:7717` control panel for provider / voice / model / tuning + live preview |
 
 The hook and MCP toggle work whether or not the panel is open.
 
@@ -179,7 +183,7 @@ the cache directory. Connecting the MCP server alone does not enable auto-speak.
 **Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
 opens the panel in one click.
 
-Quick smoke test, no Claude Code required:
+Quick smoke test, neither assistant required:
 
 ```powershell
 npm run say "readback is online"
@@ -188,14 +192,47 @@ npm run voices        # list the active provider's voices
 
 ### Day to day (and after a reboot)
 
-**Nothing to restart.** Claude Code launches the MCP server itself, and the hook
-is just a line in its settings file, so both come back on their own after a
-reboot.
+Once registered, Claude and Codex use ReadBack independently. Opening either
+assistant loads its configured MCP controls; its Stop hook reads the saved
+master and agent switches for each reply. Closing one assistant does not turn
+off the other or reset your choices. No manual speech-service startup is needed.
 
-The control panel is **optional and on-demand**: a settings GUI, not a background
-service. Voice keeps working whether or not it's open, because the hook reads
-your saved settings from disk. Launch it (Desktop icon or `npm run panel`) when
-you want to switch voice, provider or speed, then close it again.
+The panel server runs independently of both assistants. The Desktop shortcut
+starts it if needed and opens the settings page; opening the shortcut again
+reuses the running server. Closing the browser tab only closes the view.
+Automatic speech works even when the panel server is not running.
+
+Use the Desktop shortcut for normal use, or start the independent panel directly:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/launch-panel.ps1
+```
+
+Add `-NoOpen` to start it without opening a browser. To launch the panel at Windows
+sign-in, place a shortcut to `scripts/launch-panel.vbs` in your Startup folder
+(open `shell:startup` from Windows Run). This is optional; it is not required for
+automatic speech. The development command `npm run panel` stays attached to the
+terminal that runs it.
+
+### Codex background turns and playback lifetime
+
+Composer predictions (the gray suggested next message), subagents, ephemeral
+sessions, and turns whose origin cannot be verified stay silent. Automatic Codex
+speech requires a saved main-chat transcript with the matching session and turn.
+The spoken text still comes from the Stop event's `last_assistant_message`.
+The provenance check uses current transcript metadata because Stop does not
+expose the turn trigger; future Codex metadata changes may need a compatibility
+update. Manual MCP speech remains available.
+
+On Windows, both the panel launcher and Codex speech worker use WMI to start
+outside the calling app's process job. This lets playback finish when Codex
+completes its turn and cleans up the hook. A normal Node detached child still
+belongs to that job and can be terminated with it.
+
+Reply text travels in a single-use file in the user's ReadBack cache, which the
+worker removes after reading. Environment variables travel through the launcher
+in memory, never in command-line arguments or the reply file. Stop, master mute,
+and per-agent mute continue to use the shared queue and player controls.
 
 ## Using it
 
@@ -265,11 +302,3 @@ acts as a backstop rather than clipping normal replies. Set
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-### Codex background turns and panel lifetime
-
-Automatic Codex speech requires a saved main-chat transcript containing the matching turn. Composer predictions (the gray suggested next message), subagents, ephemeral sessions, and turns whose origin cannot be verified stay silent. The hook still uses `last_assistant_message` for spoken text. This guard reads Codex's current transcript metadata because the Stop payload does not expose the turn trigger; future metadata changes may require a compatibility update. Manual MCP speech remains available.
-
-The Windows shortcut uses `scripts/launch-panel.ps1` through the hidden VBS launcher. It verifies ReadBack's health endpoint and starts the panel through WMI so the server survives closing the app or terminal that launched it. To start it without opening a browser, run `powershell -NoProfile -File scripts/launch-panel.ps1 -NoOpen`. A raw `npm run panel` remains tied to the terminal that runs it.
-
-Codex's Windows speech worker also launches through WMI, outside the hook job. A normal Node detached process still belongs to that job and can be killed when Codex finishes a turn. Reply text travels in a single-use file in the user's ReadBack cache, which the worker removes after reading; environment variables travel through the launcher's stdin and are never put in command-line arguments. Stop, master mute, and per-agent mute continue to use the shared queue and player controls.
