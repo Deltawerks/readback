@@ -6,7 +6,7 @@ the terminal scroll. Flip it off and it stops immediately, mid-sentence if the
 phone rings.
 
 <p align="center">
-  <img src="img/readback.png" alt="Readback control panel" width="420" />
+  <img src="img/readback-profiles.jpg" alt="Readback control panel" width="420" />
 </p>
 
 - 🪟 **Windows-first.** Plays through built-in PowerShell audio, with zero

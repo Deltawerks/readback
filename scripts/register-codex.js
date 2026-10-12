@@ -15,4 +15,4 @@ console.log('2. Optionally merge codex-mcp-snippet.toml into ~/.codex/config.tom
 console.log('3. Review and trust the new hook in Codex, then start a fresh local chat.');
 console.log('   If your desktop version has no hook review UI, use /hooks in the Codex CLI.');
 console.log('The Windows command is an encoded PowerShell invocation of Node and the script above.');
-console.log('Voice, mute, provider keys and the queue are shared with Claude. Nothing was enabled or installed.');
+console.log('Claude and Codex have separate voice settings; master mute, provider keys and the queue are shared. Nothing was enabled or installed.');
