@@ -9,7 +9,7 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
-import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS } from './config.js';
+import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS, DUCKING_DEFAULTS } from './config.js';
 import { PROVIDER_IDS } from './providers/index.js';
 import { migrateConfig } from './providers/inworld.js';
 import { log } from './log.js';
@@ -245,6 +245,49 @@ function readSettingsFile() {
   return parsed;
 }
 
+const APP_NAME_RE = /^[A-Za-z0-9 ._+-]{1,64}$/;
+
+// Process names as Windows reports them, minus ".exe". Junk is dropped rather
+// than stored, duplicates fold case-insensitively, and the list is capped, so a
+// pasted wall of text can't bloat the file every ReadBack process reads.
+export function cleanAppList(value, fallback) {
+  if (!Array.isArray(value)) return [...fallback];
+  const out = [];
+  const seen = new Set();
+  for (const raw of value) {
+    if (typeof raw !== 'string') continue;
+    const name = raw.trim().replace(/\.exe$/i, '').trim();
+    if (!APP_NAME_RE.test(name) || seen.has(name.toLowerCase())) continue;
+    seen.add(name.toLowerCase());
+    out.push(name);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+function clampLevel(value, fallback) {
+  const n = Number(value);
+  if (value === null || value === '' || !Number.isFinite(n)) return fallback;
+  return Math.min(0.5, Math.max(0, n));
+}
+
+// The ducking block, always complete and always sane. Like `enabled`, only the
+// boolean true counts as on; a missing switch takes its default.
+export function normalizeDucking(saved) {
+  const p = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  const flag = (k) => (p[k] === undefined ? DUCKING_DEFAULTS[k] : p[k] === true);
+  return {
+    enabled: p.enabled === true,
+    onSpeech: flag('onSpeech'),
+    onMic: flag('onMic'),
+    voiceUnderMic: flag('voiceUnderMic'),
+    depth: clampLevel(p.depth, DUCKING_DEFAULTS.depth),
+    voiceDepth: clampLevel(p.voiceDepth, DUCKING_DEFAULTS.voiceDepth),
+    micApps: cleanAppList(p.micApps, DUCKING_DEFAULTS.micApps),
+    neverDuck: cleanAppList(p.neverDuck, DUCKING_DEFAULTS.neverDuck),
+  };
+}
+
 // Merge stored state over defaults (including per-provider blocks) and migrate a
 // legacy flat state (voiceId/speed/expression at top level) into the inworld block.
 function normalize(parsed) {
@@ -287,6 +330,7 @@ function normalize(parsed) {
       elevenlabs: { ...s.elevenlabs, ...(p.elevenlabs || {}) },
     }];
   }));
+  s.ducking = normalizeDucking(parsed.ducking);
   return s;
 }
 
@@ -406,6 +450,21 @@ export function writeAgentState(agent, patch) {
     if (agent === 'claude') {
       for (const k of ['provider', ...PROVIDER_IDS]) next[k] = p[k];
     }
+    next.updatedAt = new Date().toISOString();
+    for (const k of RUNTIME_KEYS) delete next[k];
+    writeAtomic(next);
+  });
+  return readState();
+}
+
+// Merge a ducking patch INSIDE the settings lock, like writeAgentState: a late
+// slider save must never restore an old master mute or agent switch, and this
+// write touches nothing but the ducking block.
+export function writeDuckingState(patch) {
+  ensureStateDir();
+  withSettingsLock(() => {
+    const next = normalize(readSettingsFile() || {});
+    next.ducking = normalizeDucking({ ...next.ducking, ...(patch || {}) });
     next.updatedAt = new Date().toISOString();
     for (const k of RUNTIME_KEYS) delete next[k];
     writeAtomic(next);

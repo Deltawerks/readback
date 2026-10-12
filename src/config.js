@@ -113,6 +113,24 @@ export const STREAM_SCRIPT = path.join(ROOT, 'scripts', 'play-stream.ps1');
 
 export const PORT = num(process.env.READBACK_PORT, 7717);
 
+// Transient ducking bookkeeping: apps we lowered and their original levels, so
+// a crash or power cut mid-dip can be undone on the next panel start. Lives in
+// the cache dir like the queue and the player list, never with settings.
+export const DUCKING_FILE = path.join(CACHE_DIR, 'ducking.json');
+
+// Off on a fresh install, so ReadBack never changes anyone's volume uninvited.
+// `claude` is Claude Desktop's process name; `ChatGPT` is Codex Desktop's.
+export const DUCKING_DEFAULTS = Object.freeze({
+  enabled: false,
+  onSpeech: true,
+  onMic: true,
+  voiceUnderMic: true,
+  depth: 0.1,
+  voiceDepth: 0.15,
+  micApps: Object.freeze(['claude', 'ChatGPT']),
+  neverDuck: Object.freeze([]),
+});
+
 // Origins outside this machine that may read voice state and flip voice on/off,
 // comma-separated. EMPTY BY DEFAULT: the panel stays strictly loopback unless
 // you deliberately name an origin, so a stock install grants nothing. Anything
