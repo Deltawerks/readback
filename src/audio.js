@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { writeFileSync, renameSync, readdirSync, rmSync, mkdirSync } from 'node:fs';
+import { writeFileSync, renameSync, readdirSync, unlinkSync, rmdirSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR, STREAM_SCRIPT } from './config.js';
 import { readState, writeState, ensureStateDir } from './state.js';
@@ -32,13 +32,25 @@ export function stopPlayback(agent) {
 // in the cache dir, and never the one being started.
 const STREAM_DIR_RE = /^stream-\d+(?:-\d+){0,2}$/;
 
+// Not rmSync: it quietly removes nothing when the path has non-ASCII
+// characters (seen on Node 24 on Windows), so under a profile folder such as
+// C:\Users\José every reply's audio stayed in the cache for good.
+function removeTree(dir) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) removeTree(p);
+    else unlinkSync(p);
+  }
+  rmdirSync(dir);
+}
+
 function cleanOldStreams(keepDir) {
   try {
     const keep = keepDir ? path.basename(keepDir) : null;
     for (const f of readdirSync(CACHE_DIR)) {
       if (STREAM_DIR_RE.test(f) && f !== keep) {
         try {
-          rmSync(path.join(CACHE_DIR, f), { recursive: true, force: true });
+          removeTree(path.join(CACHE_DIR, f));
         } catch {
           // a dying player may still hold a clip, cleaned next time
         }

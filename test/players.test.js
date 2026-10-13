@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -158,6 +159,32 @@ test('two tickets or stream dirs from one process in the same millisecond do not
   // and the cleanup that runs inside newStreamDir removed the older one only
   assert.equal(existsSync(d2), true);
   assert.equal(readdirSync(DIR).filter((f) => f.startsWith('stream-')).length, 1);
+});
+
+// fs.rmSync quietly removes nothing when the path has non-ASCII characters
+// (seen on Node 24 on Windows), so under a profile folder such as
+// C:\Users\José every reply's audio stayed in the cache for good.
+test('old stream dirs are cleaned up under a cache path with non-ASCII characters', async () => {
+  const cache = mkdtempSync(path.join(tmpdir(), 'readback-José-cache-'));
+  try {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import { mkdirSync, writeFileSync, readdirSync } from 'node:fs';
+      import path from 'node:path';
+      const old = path.join(process.env.READBACK_CACHE_DIR, 'stream-1-1-1');
+      mkdirSync(old, { recursive: true });
+      writeFileSync(path.join(old, 'chunk-000.wav'), 'old audio');
+      const { newStreamDir } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'src', 'audio.js')).href)});
+      newStreamDir();
+      process.stdout.write(JSON.stringify(readdirSync(process.env.READBACK_CACHE_DIR).filter((f) => f.startsWith('stream-'))));
+    `], { encoding: 'utf8', windowsHide: true, env: { ...process.env, READBACK_STATE_DIR: cache, READBACK_CACHE_DIR: cache } });
+    assert.equal(r.status, 0, r.stderr);
+    const left = JSON.parse(r.stdout);
+    assert.equal(left.length, 1, `still there: ${left.join(', ')}`);
+    assert.notEqual(left[0], 'stream-1-1-1');
+  } finally {
+    // rmSync has the same trouble with this path; fs.rm does not.
+    await rm(cache, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 test('muting one agent stops its marked and unmarked players without stopping the other agent', WINDOWS_ONLY, async () => {
