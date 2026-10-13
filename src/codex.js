@@ -119,7 +119,7 @@ export function stripCodexMetadata(text) {
   return text
     .replace(/<oai-mem-citation\b[^>]*>[\s\S]*?(?:<\/oai-mem-citation>|$)/gi, ' ')
     .replace(/\uE200[^\uE201]*\uE201/g, ' ')
-    .replace(/^\s*::[a-z][a-z0-9-]*\{[^\n]*\}\s*$/gim, ' ')
+    .replace(/^[ \t]*::[a-z][a-z0-9-]*\{[^\n]*\}[ \t]*$/gim, ' ') // [ \t]: \s would rescan blank lines
     .replace(/:codex-followup\[([^\]]*)\]\{[^\n]*?\}/g, '$1');
 }
 

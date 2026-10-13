@@ -26,8 +26,11 @@ export function stripForSpeech(md) {
   t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');   // links -> link text
   t = t.replace(/\bhttps?:\/\/\S+/gi, 'link');     // bare URLs -> "link"
   t = t.replace(/^[ \t]{0,3}#{1,6}[ \t]+(.*)$/gm, `${BREAK}$1${BREAK}`); // ATX headers
-  t = t.replace(/^\s*>\s?/gm, '');                 // blockquotes
-  t = t.replace(/^\s*([-*_])(?:\s*\1){2,}\s*$/gm, ' '); // horizontal rules
+  // Line-start rules use [ \t], never \s: under the m flag \s runs across
+  // newlines, so ^\s* rescanned every blank line below each line start, and a
+  // reply padded with blank lines took seconds to clean.
+  t = t.replace(/^[ \t]*>[ \t]?/gm, '');           // blockquotes
+  t = t.replace(/^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/gm, ' '); // horizontal rules
   t = t.replace(/^[ \t]*[-*+][ \t]+/gm, BREAK);    // bullet markers
   t = t.replace(/^[ \t]*\d+[.)][ \t]+/gm, BREAK);  // numbered markers
   t = t.replace(/(\*\*|__)(.*?)\1/g, '$2');        // bold
