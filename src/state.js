@@ -9,7 +9,10 @@ import {
   statSync,
 } from 'node:fs';
 import path from 'node:path';
-import { STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS, DUCKING_DEFAULTS } from './config.js';
+import {
+  STATE_DIR, LEGACY_STATE_DIRS, STATE_FILE, RUNTIME_FILE, SECRET_FILE, DEFAULTS, DUCKING_DEFAULTS,
+  MAX_CHARS_OVERRIDE, positiveInt,
+} from './config.js';
 import { PROVIDER_IDS } from './providers/index.js';
 import { migrateConfig } from './providers/inworld.js';
 import { log } from './log.js';
@@ -307,6 +310,10 @@ function normalize(parsed) {
 
   if (!PROVIDER_IDS.includes(s.provider)) s.provider = 'inworld';
 
+  // A blank READBACK_MAX_CHARS once saved a cap of 0, which cut every reply
+  // down to "the rest is on screen".
+  s.maxChars = positiveInt(s.maxChars, DEFAULTS.maxChars);
+
   // Only the boolean true means voice is on. A string "false", a 1, or a null
   // that reached the file through some other client must never be read as on
   // by the workers while a panel shows off.
@@ -354,6 +361,9 @@ export function readState() {
   }
   const runtime = readRuntime();
   for (const k of RUNTIME_KEYS) settings[k] = runtime[k] ?? null;
+  // Applied here and never in normalize(), so the writers never save it: the
+  // variable wins while it is set, and removing it brings back the saved cap.
+  if (MAX_CHARS_OVERRIDE) settings.maxChars = MAX_CHARS_OVERRIDE;
   return settings;
 }
 

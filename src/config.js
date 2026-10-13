@@ -51,9 +51,13 @@ function loadDotEnv() {
 }
 loadDotEnv();
 
-function num(value, def) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : def;
+// A whole number above zero, or the fallback. Blank means unset, not zero:
+// Number('') is 0, so a blank READBACK_MAX_CHARS used to cut every reply to
+// nothing and a blank READBACK_PORT bound a random port.
+export function positiveInt(value, def, max = Number.MAX_SAFE_INTEGER) {
+  const n = typeof value === 'number' ? value
+    : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+  return Number.isInteger(n) && n > 0 && n <= max ? n : def;
 }
 
 // State + secrets live in a per-user dir, deliberately NOT inside the
@@ -119,7 +123,11 @@ export const LOG_FILE = path.join(CACHE_DIR, 'readback.log');
 export const SECRET_FILE = path.join(STATE_DIR, 'secret.json');
 export const STREAM_SCRIPT = path.join(ROOT, 'scripts', 'play-stream.ps1');
 
-export const PORT = num(process.env.READBACK_PORT, 7717);
+export const PORT = positiveInt(process.env.READBACK_PORT, 7717, 65535);
+
+// Nothing in the panel sets the length cap, so this one environment variable
+// wins on every read instead of only seeding a new install (see readState).
+export const MAX_CHARS_OVERRIDE = positiveInt(process.env.READBACK_MAX_CHARS, null);
 
 // Transient ducking bookkeeping: apps we lowered and their original levels, so
 // a crash or power cut mid-dip can be undone on the next panel start. Lives in
@@ -223,7 +231,7 @@ export const DEFAULTS = {
   // not a normal-reply limit. 1800 silently cut the tail off ~15% of replies,
   // and it was always the long summaries (the part worth hearing). Lower it via
   // READBACK_MAX_CHARS if you'd rather cap how long a read can run.
-  maxChars: num(process.env.READBACK_MAX_CHARS, 12000),
+  maxChars: 12000,
   lastPid: null,
   lastSpokenId: null,
   lastSpokenBy: null,
