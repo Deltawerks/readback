@@ -73,8 +73,9 @@ In the panel: pick a **provider**, paste that provider's **API key**, choose a
 npm run register     # writes .mcp.json + hooks-snippet.json for this folder
 ```
 
-**1. MCP server** (the in-chat toggle). Auto-loads whenever you work in this
-folder. To get it in *every* project, run the `claude mcp add` line that
+**1. MCP server** (the in-chat toggle). When you work in this folder, Claude
+Code finds the server in `.mcp.json` and asks you to approve it before it starts
+it. To get it in *every* project, run the `claude mcp add` line that
 `register` prints. That line uses **user scope** (`-s user`), which registers the
 server once for your whole account. It matters: `claude mcp add` defaults to
 local scope, which is only the project folder you ran it in, so without `-s user`
@@ -179,13 +180,14 @@ working while ReadBack reads that stop's reply.
 **Disconnect or roll back:** remove only ReadBack's entry from Codex's `Stop`
 array, and optionally its `[mcp_servers.readback]` table. Restart Codex. Claude
 continues using its existing hook and saved settings. To return the application
-code to the pre-Codex release without overwriting your checkout, create a separate
-checkout at commit `2ad8aeb80f0c3ba993d0da8b46cdf1eb6a17f649` (version 0.5.2), run
-`npm ci`, and regenerate the Claude registration for that location. Keep the
-current checkout until the old version is verified. Do not delete `.readback`:
-it holds your saved voices and keys. Version 0.6.0 automatically adds agent
-profiles on the next settings save. Back up state.json before downgrading: 0.5.2
-cannot control separate profiles, and older Inworld models are deprecated.
+code to the pre-Codex release without overwriting your checkout, make a separate
+checkout of tag `v0.5.2` (for example `git worktree add ..\readback-0.5.2 v0.5.2`),
+run `npm ci` there, and regenerate the Claude registration for that location.
+Keep the current checkout until the old version is verified. Do not delete
+`%USERPROFILE%\.readback`: both versions keep your saved voices and keys there.
+Since 0.7.0, the next settings save adds agent profiles to `state.json`, and
+0.5.2 cannot control separate profiles, so back up `state.json` before
+downgrading.
 
 If Codex is silent, check hook trust, both master and Codex switches, and `readback.log` in
 the cache directory. Connecting the MCP server alone does not enable auto-speak.
@@ -193,11 +195,12 @@ the cache directory. Connecting the MCP server alone does not enable auto-speak.
 **Optional:** `npm run shortcut` drops a "ReadBack" icon on your Desktop that
 opens the panel in one click.
 
-Quick smoke test, neither assistant required:
+Quick smoke test, neither assistant required (it speaks only while master
+speech and Claude speech are on):
 
 ```powershell
-npm run say "readback is online"
-npm run voices        # list the active provider's voices
+npm run say "ReadBack is online"
+npm run voices        # list the voices of the Claude profile's provider
 ```
 
 ### Day to day (and after a reboot)
@@ -426,13 +429,21 @@ may flag them:
   (`%USERPROFILE%\.readback\cache` on Windows); `npm run where` prints its exact
   path.
 
+## Tests
+
+`npm test` runs the test suite. No test calls Inworld or ElevenLabs, and none
+changes real audio levels. `npm run test:audio` runs the Windows audio
+integration tests: they play a silent test tone and briefly change that test
+app's per-app volume, never another app's. If ReadBack's own ducking is
+switched on, switch it off before running them.
+
 ## Contributors
 
 ReadBack is a DeltaWerks project built with contributions from multiple AI coding assistants:
 
 - **DeltaWerks** - project creator, product direction, design, and real-world testing.
 - **Claude (Anthropic)** - the original Claude integration, earlier speech, queue, and settings-reliability work, and voice-aware ducking in 0.7.
-- **Codex (OpenAI)** - Codex integration, independent Claude/Codex profiles, Inworld TTS-2 controls, Windows playback-lifetime fixes, regression tests, and documentation for the 0.6 release.
+- **Codex (OpenAI)** - Codex integration, independent Claude/Codex profiles, Inworld TTS-2 controls, Windows playback-lifetime fixes, regression tests, and documentation for the 0.6 work that shipped in 0.7.0.
 
 ## License
 
