@@ -75,6 +75,7 @@ function startHelper() {
     windowsHide: true,
   });
   const waiters = [];
+  const logs = [];
   let stderr = '';
   child.stderr.on('data', (d) => {
     stderr += d;
@@ -86,6 +87,7 @@ function startHelper() {
     } catch {
       return;
     }
+    if (m.t === 'log') logs.push(m.msg);
     for (const w of [...waiters]) {
       if (!w.match(m)) continue;
       waiters.splice(waiters.indexOf(w), 1);
@@ -97,6 +99,7 @@ function startHelper() {
   return {
     child,
     exited,
+    logs,
     send: (o) => child.stdin.write(`${JSON.stringify(o)}\n`),
     waitFor: (match, ms = 20000) =>
       new Promise((resolve, reject) => {
@@ -151,6 +154,9 @@ test('an arm applies to a session the process only creates afterwards', { skip: 
     h.send({ c: 'quit' });
     await h.exited;
     assert.ok(near(await levelOf(tone.pid), 1), 'quit returns armed processes to full');
+    // Lowering any other app must never touch the level Windows keeps for
+    // powershell.exe: that level is ReadBack's real voice on this machine.
+    assert.ok(!h.logs.some((l) => /powershell/i.test(l)), `no powershell.exe reset: ${h.logs}`);
   } finally {
     tone.kill();
   }

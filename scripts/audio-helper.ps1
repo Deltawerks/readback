@@ -277,7 +277,10 @@ namespace ReadbackAudio
             }
             vol = Clamp(vol);
             arms[pid] = vol;
-            if (vol < 0.999f) loweredPlayers = true;
+            // Only a lowered powershell.exe (one of ReadBack's players) can leave a
+            // low level for the next player to inherit; any other app is not ours
+            // to reset.
+            if (vol < 0.999f && IsPowerShell(pid)) loweredPlayers = true;
             foreach (Session x in sessions.Values)
             {
                 if (x.IsMic || x.Pid != pid || x.Volume == null) continue;
@@ -440,6 +443,12 @@ namespace ReadbackAudio
             sessions[key] = x;
         }
 
+        bool IsPowerShell(uint pid)
+        {
+            string name = NameOf(pid).ToLowerInvariant();
+            return name == "powershell" || name == "pwsh";
+        }
+
         string NameOf(uint pid)
         {
             if (pid == 0) return "";
@@ -557,6 +566,7 @@ namespace ReadbackAudio
         // the next player inherits once nothing is left to arm it.
         void ResetOwnLevel()
         {
+            Log("reset the level Windows keeps for powershell.exe to full");
             foreach (Endpoint ep in endpoints.Values)
             {
                 if (ep.IsMic) continue;
