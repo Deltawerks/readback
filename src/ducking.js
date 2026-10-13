@@ -31,6 +31,15 @@ const pct = (x) => `${Math.round(x * 100)}%`;
 const validEntry = (e) =>
   Boolean(e) && typeof e.name === 'string' && e.name !== '' && [e.orig, e.low, e.at].every(Number.isFinite);
 
+// Windows keys an audio session by device, app and session, then the process:
+// "...|<device>|<exe>%b{session}|1%b<pid>". Without the process part it names
+// the place Windows keeps that app's level on that device, which is what a
+// leftover has to match: the same app on another device is a different level.
+export const sessionId = (key) => String(key || '').replace(/\|\d+%b\d+$/, '');
+// A leftover written before session ids were recorded matches by name only.
+const leftoverFor = (p, o) => (p.sid ? p.sid === sessionId(o.key) : lower(p.name) === lower(o.name));
+const record = ({ name, sid, orig, low, at }) => ({ name, ...(sid ? { sid } : {}), orig, low, at });
+
 function ramp(value, target, depth, dt) {
   const span = Math.max(1 - depth, 0.01);
   if (value > target) return Math.max(target, value - (span * dt) / TIMING.attackMs);
@@ -54,12 +63,48 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   // Apps left lowered by a previous run, or closed mid-dip. Windows hands a
   // reopened app the level it last had, so these come back quiet unless we put
   // them back.
-  let pending = recovery.filter(validEntry).map(({ name, orig, low, at }) => ({ name, orig, low, at }));
+  let pending = recovery.filter(validEntry).map(record);
+  // Put-backs sent but not yet confirmed by a helper report, by session key.
+  // An app leaves the books only once a report shows its put-back applied:
+  // until then the helper's report may still show the dip (it applies
+  // commands on its own 50 ms loop), and a helper that hangs or is replaced
+  // never applies it at all. Forgetting at send time lost the app's level in
+  // both cases.
+  const puttingBack = new Map(); // key -> { name, sid, orig, low, at, seq, resend }
+  // After the restore button: leave everything at full until whatever was
+  // holding it down has stopped, or the button undoes itself on the next tick.
+  let suspended = false;
   let version = 1; // starts "changed", so the first tick reports the list
   let reported = 0;
   const touch = () => {
     version++;
   };
+
+  function putBack(commands, key, e) {
+    const c = send(commands, { c: 'set', key, vol: e.orig });
+    puttingBack.set(key, { ...record({ ...e, sid: e.sid || sessionId(key) }), seq: c.seq, resend: false });
+    touch();
+    return c;
+  }
+
+  // Settle the put-backs a report has caught up with. One whose session went
+  // away first becomes a leftover; after a helper restart each is sent again.
+  function confirmPutBacks(helper, commands) {
+    for (const [key, p] of puttingBack) {
+      const o = helper.out.find((x) => x.key === key);
+      if (!p.resend && helper.seq >= p.seq) {
+        puttingBack.delete(key);
+        touch();
+      } else if (!o) {
+        puttingBack.delete(key);
+        pending.push(record(p));
+        touch();
+      } else if (p.resend) {
+        p.seq = send(commands, { c: 'set', key, vol: p.orig }).seq;
+        p.resend = false;
+      }
+    }
+  }
 
   function send(commands, command) {
     const c = { ...command, seq: ++seq };
@@ -86,7 +131,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   // between). Any other level means the user has set it since, so the entry is
   // dropped either way.
   function takePending(o) {
-    const i = pending.findIndex((p) => lower(p.name) === lower(o.name));
+    const i = pending.findIndex((p) => leftoverFor(p, o));
     if (i < 0) return null;
     const [p] = pending.splice(i, 1);
     touch();
@@ -102,7 +147,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
       if (!o.name || o.vol < 0) continue;
       const p = takePending(o);
       if (!p) continue;
-      send(commands, { c: 'set', key: o.key, vol: p.orig });
+      putBack(commands, o.key, p);
       log(`ducking: put ${o.name} back to ${pct(p.orig)}; it had been left lowered`);
     }
   }
@@ -124,7 +169,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
         if (e.user) continue;
         if (!eligible(o, f)) {
           // Moved to never-lower (or made a dictation app) mid-dip: back now.
-          send(commands, { c: 'set', key: o.key, vol: e.orig });
+          putBack(commands, o.key, e);
           send(commands, { c: 'forget', key: o.key });
           ducked.delete(o.key);
           touch();
@@ -148,7 +193,14 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
       }
       if (factor < 1 && o.playing && eligible(o, f)) {
         const leftover = takePending(o);
-        const orig = leftover ? leftover.orig : o.vol;
+        // A put-back no report has shown applied yet: the report can still show
+        // the dip, and that must never become the app's original.
+        const back = puttingBack.get(o.key);
+        if (back) {
+          puttingBack.delete(o.key);
+          touch();
+        }
+        const orig = back ? back.orig : leftover ? leftover.orig : o.vol;
         const entry = { name: o.name, orig, low: r3(orig * s.depth), sent: o.vol, sentSeq: Infinity, user: false, at: now };
         ducked.set(o.key, entry);
         touch();
@@ -160,7 +212,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
       // Closed mid-dip. Windows will give its next session the level we left,
       // so keep a leftover and put it back when the app returns.
       ducked.delete(key);
-      if (!e.user && e.sent < e.orig - SEND_STEP) pending.push({ name: e.name, orig: e.orig, low: e.low, at: now });
+      if (!e.user && e.sent < e.orig - SEND_STEP) pending.push(record({ ...e, sid: sessionId(key), at: now }));
       touch();
     }
   }
@@ -198,8 +250,14 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     }
   }
 
+  // The fade is back at every original: say so once more as a tracked put-back,
+  // so the app stays on the books until a report shows it applied.
   function endEpisode(commands) {
-    for (const [key, e] of ducked) if (!e.user) send(commands, { c: 'forget', key });
+    for (const [key, e] of ducked) {
+      if (e.user) continue;
+      putBack(commands, key, e);
+      send(commands, { c: 'forget', key });
+    }
     ducked.clear();
     touch();
   }
@@ -210,14 +268,16 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   // report puts it back.
   function restore(commands, helper) {
     let count = 0;
+    const done = new Set();
     for (const [key, e] of ducked) {
       if (e.user) continue;
       if (!helper) {
-        pending.push({ name: e.name, orig: e.orig, low: e.low, at: e.at });
+        pending.push(record({ ...e, sid: sessionId(key) }));
         continue;
       }
-      send(commands, { c: 'set', key, vol: e.orig });
+      putBack(commands, key, e);
       send(commands, { c: 'forget', key });
+      done.add(key);
       count++;
     }
     ducked.clear();
@@ -228,15 +288,14 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     }
     players.clear();
     if (helper) {
+      // Leftovers the helper can see now, still at a level we left them at
+      // (and never the session just put back above).
       for (const o of helper.out) {
-        if (!o.name || o.vol < 0) continue;
-        const i = pending.findIndex((p) => lower(p.name) === lower(o.name));
-        if (i < 0) continue;
-        const [p] = pending.splice(i, 1);
-        if (o.vol < p.orig - SEND_STEP) {
-          send(commands, { c: 'set', key: o.key, vol: p.orig });
-          count++;
-        }
+        if (!o.name || o.vol < 0 || done.has(o.key)) continue;
+        const p = takePending(o);
+        if (!p) continue;
+        putBack(commands, o.key, p);
+        count++;
       }
     }
     factor = 1;
@@ -263,8 +322,9 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     if (version !== reported) {
       reported = version;
       recoveryList = [
-        ...pending.map((p) => ({ ...p })),
-        ...[...ducked.values()].filter((e) => !e.user).map(({ name, orig, low, at }) => ({ name, orig, low, at })),
+        ...pending.map(record),
+        ...[...ducked].filter(([, e]) => !e.user).map(([key, e]) => record({ ...e, sid: sessionId(key) })),
+        ...[...puttingBack.values()].map(record),
       ];
     }
     return {
@@ -293,6 +353,8 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     const speech = f.pids.size > 0;
 
     if (s.enabled !== true) {
+      suspended = false;
+      if (helper) confirmPutBacks(helper, commands);
       if (ducked.size || players.size || factor < 1 || voiceFactor < 1) {
         restore(commands, helper);
         log(helper ? 'ducking: switched off; everything put back' : 'ducking: switched off with no audio helper running; lowered apps kept to put back later');
@@ -304,8 +366,12 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
       return finish(commands, micUsers, speech);
     }
 
-    const othersOn = (s.onSpeech && speech) || (s.onMic && micUsers.length > 0);
-    const voiceOn = s.voiceUnderMic && micUsers.length > 0;
+    let othersOn = (s.onSpeech && speech) || (s.onMic && micUsers.length > 0);
+    let voiceOn = s.voiceUnderMic && micUsers.length > 0;
+    if (suspended) {
+      if (othersOn || voiceOn) othersOn = voiceOn = false;
+      else suspended = false;
+    }
     if (othersOn) lastOthers = now;
     if (voiceOn) lastVoice = now;
     const othersTarget = othersOn || now - lastOthers < TIMING.holdMs ? s.depth : 1;
@@ -314,6 +380,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     voiceFactor = ramp(voiceFactor, voiceTarget, s.voiceDepth, dt);
 
     if (helper) {
+      confirmPutBacks(helper, commands);
       resolvePending(helper, commands, now);
       driveOthers(helper, commands, now, f, s);
       drivePlayers(helper, commands, f, s);
@@ -325,6 +392,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   function restoreAll(helper = null) {
     const commands = [];
     const restored = restore(commands, helper);
+    suspended = true;
     const waiting = helper ? 0 : pending.length;
     if (restored) log(`ducking: restore button put back ${restored} app${restored === 1 ? '' : 's'}`);
     if (waiting) log(`ducking: restore button pressed with no audio helper running; ${waiting} app${waiting === 1 ? '' : 's'} kept to put back`);
@@ -332,12 +400,13 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   }
 
   // A restarted helper remembers nothing: re-send every level, with its
-  // original, and every arm on the next tick.
+  // original, every unconfirmed put-back, and every arm on the next tick.
   function helperRestarted() {
     for (const e of ducked.values()) {
       e.sent = -1;
       e.sentSeq = Infinity;
     }
+    for (const p of puttingBack.values()) p.resend = true;
     for (const p of players.values()) {
       p.sent = null;
       p.sentSeq = Infinity;

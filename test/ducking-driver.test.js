@@ -24,8 +24,9 @@ const ON = {
 const MB = { key: 'mb', pid: 50, name: 'MusicBee', vol: 0.8, playing: true, system: false };
 
 // A driver wired to a fake supervisor that records what it is asked to do,
-// in order, in r.events.
-function rig({ platform = 'win32', helperMode, settings = ON, recovery } = {}) {
+// in order, in r.events. helperMode is always passed, so a developer's own
+// READBACK_DUCKING_HELPER cannot change what these tests see.
+function rig({ platform = 'win32', helperMode = 'auto', settings = ON, recovery } = {}) {
   const fake = { cb: null, running: false };
   const r = {
     settings,
@@ -79,6 +80,11 @@ function rig({ platform = 'win32', helperMode, settings = ON, recovery } = {}) {
     fake.cb.onMessage({ t: 'ready', v: 1 });
     fake.cb.onMessage({ t: 'state', seq: 0, mic, out });
   };
+  // A report that has caught up with every command sent so far.
+  r.confirm = (out, mic = []) => {
+    const seq = Math.max(0, ...r.events.filter((e) => e && Number.isFinite(e.seq)).map((e) => e.seq));
+    fake.cb.onMessage({ t: 'state', seq, mic, out });
+  };
   r.run = (ms) => {
     for (let t = 0; t < ms; t += TIMING.tickMs) {
       r.driver.tick();
@@ -110,9 +116,11 @@ test('switching off sends the put-backs before it closes the helper', () => {
   r.settings = { ...ON, enabled: false };
   r.now += 600; // past the settings re-read interval
   r.driver.tick();
-  const stopAt = r.events.lastIndexOf('stop');
-  const putBack = r.events.findLastIndex((e) => e && e.c === 'set' && e.key === 'mb' && e.vol === 0.8);
-  assert.ok(putBack >= 0 && putBack < stopAt, 'restore first, then close');
+  assert.ok(r.sets().some((e) => e.key === 'mb' && e.vol === 0.8), 'everything is put back');
+  assert.ok(!r.events.includes('stop'), 'the helper stays until a report shows the put-back applied');
+  r.confirm([MB]);
+  r.driver.tick();
+  assert.equal(r.events.at(-1), 'stop', 'then it is closed');
   assert.equal(existsSync(r.file), false, 'nothing left to recover');
 });
 
@@ -185,7 +193,9 @@ test('with ducking off, a leftover from a crash is still put back by a short cle
   r.report([{ ...MB, vol: 0.08 }]);
   r.driver.tick();
   assert.ok(r.sets().some((c) => c.key === 'mb' && c.vol === 0.8));
-  assert.equal(r.events.at(-1), 'stop', 'and stops it once nothing is left');
+  r.confirm([MB]);
+  r.driver.tick();
+  assert.equal(r.events.at(-1), 'stop', 'and stops it once a report shows nothing is left');
 });
 
 test('a helper that stops reporting is restarted', () => {

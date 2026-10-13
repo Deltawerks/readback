@@ -11,7 +11,12 @@ function fakeAudio() {
   const arms = new Map();
   let seq = 0;
   let nextPid = 1000;
+  let hung = false;
   return {
+    // A hung helper still has its last report on file but applies nothing.
+    hang(on) {
+      hung = on;
+    },
     play(key, name, vol = 1, { pid = nextPid++, system = false, playing = true } = {}) {
       out.set(key, { key, pid, name, vol: arms.has(pid) ? arms.get(pid) : vol, playing, system });
     },
@@ -25,6 +30,7 @@ function fakeAudio() {
       mic.set(name, { pid, name, active });
     },
     apply(commands) {
+      if (hung) return;
       for (const c of commands) {
         seq = Math.max(seq, c.seq);
         if (c.c === 'set' && out.has(c.key)) out.get(c.key).vol = c.vol;
@@ -61,8 +67,11 @@ const SETTINGS = Object.freeze({
 });
 
 // Drives a referee against the fake in 50 ms ticks, feeding every command back
-// into the fake the way the driver feeds the real helper.
-function harness({ settings = SETTINGS, recovery = [], start = 1_000_000 } = {}) {
+// into the fake the way the driver feeds the real helper. With lag, a tick's
+// commands land only after the next report has gone out, as they can with the
+// real helper's 50 ms loop, so the referee sometimes sees its own last change
+// not yet applied.
+function harness({ settings = SETTINGS, recovery = [], start = 1_000_000, lag = false } = {}) {
   const h = {
     logs: [],
     audio: fakeAudio(),
@@ -70,11 +79,23 @@ function harness({ settings = SETTINGS, recovery = [], start = 1_000_000 } = {})
     pids: [],
     now: start,
     sent: [],
+    queued: [],
     recovery: null,
     last: null,
+    // Commands from outside the tick loop (the restore button) travel the same way.
+    send(commands) {
+      if (lag) h.queued.push(...commands);
+      else h.audio.apply(commands);
+      if (commands.length) h.sent.push(...commands);
+    },
     step() {
       const out = h.ref.tick({ now: h.now, settings: h.settings, readbackPids: h.pids, helper: h.audio.state() });
-      h.audio.apply(out.commands);
+      if (lag) {
+        h.audio.apply(h.queued);
+        h.queued = [...out.commands];
+      } else {
+        h.audio.apply(out.commands);
+      }
       h.sent.push(...out.commands);
       if (out.recovery) h.recovery = out.recovery;
       h.last = out;
@@ -92,6 +113,10 @@ function harness({ settings = SETTINGS, recovery = [], start = 1_000_000 } = {})
 
 // Long enough for any dip to finish: the hold, the fade back, and some slack.
 const GONE = TIMING.holdMs + TIMING.releaseMs + 200;
+
+// Real session keys: device, app path and session, then the process id.
+const sessionKey = (device, pid) =>
+  `{0.0.0.00000000}.{${device}}|\\Device\\HarddiskVolume3\\Apps\\MusicBee.exe%b{00000000-0000-0000-0000-000000000000}|1%b${pid}`;
 
 test('ReadBack speaking lowers other audio, and it comes back exactly afterwards', () => {
   const h = harness();
@@ -197,8 +222,8 @@ test('switching ducking off mid-dip puts everything back at once', () => {
   assert.equal(h.audio.vol('mb'), 0.8);
   assert.ok(out.commands.some((c) => c.c === 'forget' && c.key === 'mb'));
   assert.equal(out.status.others, 'idle');
-  assert.deepEqual(h.recovery, []);
   assert.deepEqual(h.step().commands, [], 'nothing more to do while off');
+  assert.deepEqual(h.recovery, [], 'nothing left on record once a report shows the put-back applied');
 });
 
 test('an app that starts playing mid-dip joins it', () => {
@@ -212,17 +237,20 @@ test('an app that starts playing mid-dip joins it', () => {
 
 test('an app closed mid-dip is put back when it reopens at the level we left', () => {
   const h = harness();
-  h.audio.play('mb', 'MusicBee', 0.8);
+  const first = sessionKey('speakers', 1000);
+  const reopened = sessionKey('speakers', 2000); // same app and device, new process
+  h.audio.play(first, 'MusicBee', 0.8, { pid: 1000 });
   h.pids = [7];
   h.run(300);
-  h.audio.close('mb');
+  h.audio.close(first);
   h.step();
   assert.deepEqual(h.recovery.map((e) => [e.name, e.orig, e.low]), [['MusicBee', 0.8, 0.08]]);
   h.pids = [];
   h.run(GONE);
-  h.audio.play('mb2', 'MusicBee', 0.08); // Windows hands the new session the lowered level
+  h.audio.play(reopened, 'MusicBee', 0.08, { pid: 2000 }); // Windows hands the new session the lowered level
   h.step();
-  assert.equal(h.audio.vol('mb2'), 0.8);
+  assert.equal(h.audio.vol(reopened), 0.8);
+  h.step();
   assert.deepEqual(h.recovery, []);
 });
 
@@ -243,6 +271,7 @@ test('leftovers from a previous run are put back, unless the user changed them o
   assert.equal(h.audio.vol('mb'), 0.8);
   assert.equal(h.audio.vol('sp'), 0.7);
   assert.equal(h.audio.vol('fb'), 0.09);
+  h.step();
   assert.deepEqual(h.recovery, []);
 });
 
@@ -300,6 +329,92 @@ test('with no helper connected, the restore button keeps what it could not put b
   assert.deepEqual(out.recovery.map((e) => e.name), ['MusicBee']);
   h.step(); // a helper is reporting again
   assert.equal(h.audio.vol('mb'), 0.8);
+});
+
+// The restore button used to forget each app the moment it sent the put-back.
+// The next tick dipped again (ReadBack still talking), and the app rejoined at
+// the level in the helper's last report, which still showed the dip: that dip
+// became its "original", for good.
+test('Restore mid-dip puts the music back and keeps it there until the voice is done', () => {
+  const h = harness({ lag: true });
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.08);
+  const out = h.ref.restoreAll(h.audio.state());
+  h.send(out.commands);
+  assert.equal(out.restored, 1);
+  h.run(1000); // ReadBack is still talking
+  assert.equal(h.audio.vol('mb'), 0.8, 'the button holds until the voice is done');
+  h.pids = [];
+  h.run(GONE);
+  h.pids = [8]; // the next reply dips as usual, from the real level
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.08);
+  h.pids = [];
+  h.run(GONE);
+  assert.equal(h.audio.vol('mb'), 0.8);
+});
+
+test('switching ducking off and back on mid-dip keeps the music at its real level', () => {
+  const h = harness({ lag: true });
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  h.settings = { ...h.settings, enabled: false };
+  h.step();
+  h.settings = { ...h.settings, enabled: true };
+  h.run(1000);
+  assert.equal(h.audio.vol('mb'), 0.08, 'dipped again, from its real level');
+  h.pids = [];
+  h.run(GONE);
+  assert.equal(h.audio.vol('mb'), 0.8);
+});
+
+// The fade back was sent to a helper that had stopped applying anything, the
+// app was forgotten as it was sent, and the helper was then replaced: the
+// music stayed at 10% with nothing left on record.
+test('a put-back the helper never applied stays on record and goes to the next helper', () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  h.audio.hang(true);
+  h.pids = [];
+  h.run(GONE);
+  assert.equal(h.audio.vol('mb'), 0.08, 'nothing reached the hung helper');
+  assert.deepEqual(h.recovery.map((e) => e.name), ['MusicBee'], 'still on record');
+  h.audio.hang(false);
+  h.audio.restartHelper();
+  h.ref.helperRestarted();
+  h.run(200);
+  assert.equal(h.audio.vol('mb'), 0.8);
+  assert.deepEqual(h.recovery, []);
+});
+
+// Leftovers used to be matched by app name, so when the headphones dropped mid
+// dip the speakers' session took the headphones' original, and when the
+// headphones came back (at the lowered level Windows keeps per device) there
+// was nothing left to put them back with.
+test('an app that moves to another device mid-dip comes back right on both', () => {
+  const h = harness();
+  const headphones = sessionKey('headphones', 100);
+  const speakers = sessionKey('speakers', 100);
+  h.audio.play(headphones, 'MusicBee', 0.8, { pid: 100 });
+  h.pids = [7];
+  h.run(400);
+  h.audio.close(headphones);
+  h.audio.play(speakers, 'MusicBee', 1, { pid: 100 });
+  h.run(400);
+  assert.equal(h.audio.vol(speakers), 0.1, 'the speakers dip from their own level');
+  h.pids = [];
+  h.run(GONE);
+  assert.equal(h.audio.vol(speakers), 1);
+  h.audio.close(speakers);
+  h.audio.play(headphones, 'MusicBee', 0.08, { pid: 100 });
+  h.run(200);
+  assert.equal(h.audio.vol(headphones), 0.8);
+  assert.deepEqual(h.recovery, []);
 });
 
 test('switching off while no helper is connected keeps the leftover and puts it back once one reports', () => {
