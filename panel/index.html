@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Readback</title>
+<title>ReadBack</title>
 <style>
   /* Fonts are bundled (latin subset, variable) so the panel loads with zero
      outbound requests and renders identically offline. See fonts/README.md. */
@@ -121,7 +121,7 @@
   <div class="card">
     <div class="head">
       <div class="brand">
-        <img class="logo-img" src="logo.png" alt="Readback" />
+        <img class="logo-img" src="logo.png" alt="ReadBack" />
         <div>
           <div class="title"><span class="r">Read</span><span class="b">Back</span></div>
           <div class="subtitle">Voice for Claude &amp; Codex</div>
@@ -703,7 +703,7 @@ $('model').addEventListener('change', (e) => {
   renderCost(); renderTuning();
 });
 $('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
-$('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });
+$('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'ReadBack is online and ready.'); });
 $('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('speak').click(); });
 $('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }, SLOW_TIMEOUT_MS); toast('Stopped'); } catch (e) {} });
 $('saveKey').addEventListener('click', saveKey);
@@ -728,7 +728,7 @@ setInterval(refreshState, 3000);
     // Same honest failure as a mid-session outage: NOT CONNECTED, with the
     // reason, instead of a toggle the page cannot back up.
     syncError = e.message; renderStatus();
-    toast('Cannot reach the Readback server', true);
+    toast('Cannot reach the ReadBack server', true);
     return;
   }
   await renderAll();

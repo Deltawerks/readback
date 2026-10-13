@@ -5,7 +5,7 @@ import { readAgentState, activeConfig } from '../src/state.js';
 import { stripForSpeech } from '../src/tts.js';
 import { speak } from '../src/speak.js';
 
-const input = process.argv.slice(2).join(' ') || 'Readback is online and ready.';
+const input = process.argv.slice(2).join(' ') || 'ReadBack is online and ready.';
 const st = readAgentState(process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'claude');
 const c = activeConfig(st);
 const clean = stripForSpeech(input) || input;
