@@ -35,7 +35,7 @@ async function health(port) {
 // READBACK_PORT said, and its WMI launch handed the panel none of the caller's
 // environment, so state and cache overrides set in a shell never reached it.
 test('the panel launcher uses the configured port and hands on its environment', {
-  skip: process.platform !== 'win32', timeout: 60000,
+  skip: process.platform !== 'win32', timeout: 90000,
 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'readback-launch-'));
   const port = await freePort();
@@ -52,12 +52,18 @@ test('the panel launcher uses the configured port and hands on its environment',
     assert.match(r.stdout, new RegExp(`PID ${panel.pid}\\b`), 'the launcher reported the panel it started');
     assert.ok(existsSync(path.join(dir, 'state.json')), 'the panel did not use the state dir it was given');
   } finally {
-    // Only ever stop what answers on this test's own port.
-    const panel = await health(port);
+    // Only ever stop what answers on this test's own port. The panel runs
+    // outside any job, so one still starting when the launcher gave up gets
+    // time to answer rather than being left running.
+    let panel = await health(port);
+    for (let waited = 0; !panel && waited < 20000; waited += 500) {
+      await sleep(500);
+      panel = await health(port);
+    }
     if (panel) {
       try { process.kill(panel.pid); } catch {}
       await sleep(500);
     }
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

@@ -25,8 +25,14 @@ const FIXTURE = `
   const realSpawn = cp.spawn;
   cp.spawn = function (command, args, options) {
     if (command === 'powershell' && args.includes('-Dir')) {
-      const body = env.RB_FAKE_PLAYER === 'exit' ? 'process.exit(3)' : 'setTimeout(() => {}, 20000)';
+      // 'exit' quits as soon as the first chunk reaches it, the way a player
+      // blocked by script policy or a broken audio stack gives up.
+      const first = path.join(args[args.indexOf('-Dir') + 1], 'chunk-000.wav');
+      const body = env.RB_FAKE_PLAYER === 'exit'
+        ? 'setTimeout(() => process.exit(3), 20000); setInterval(() => { if (require("node:fs").existsSync(' + JSON.stringify(first) + ')) process.exit(3); }, 20)'
+        : 'setTimeout(() => {}, 20000)';
       const player = realSpawn(process.execPath, ['-e', body], { stdio: 'ignore', windowsHide: true });
+      globalThis.playerClosed = new Promise((r) => player.once('close', r));
       record({ event: 'player', pid: player.pid });
       return player;
     }
@@ -57,10 +63,13 @@ const FIXTURE = `
     b.write('data', 36); b.writeUInt32LE(data, 40);
     return b;
   };
+  let synths = 0;
   globalThis.fetch = async (url, init) => {
     if (String(url) !== 'https://api.inworld.ai/tts/v1/voice') throw new Error('unexpected network request');
     record({ event: 'synthesize' });
-    await new Promise((r) => setTimeout(r, Number(env.RB_FAKE_SYNTH_MS || 0)));
+    // So with the 'exit' player the second chunk is still being synthesized
+    // when the player quits, however fast or slow the machine is.
+    if (++synths > 1 && env.RB_FAKE_PLAYER === 'exit') await globalThis.playerClosed;
     return new Response(JSON.stringify({ audioContent: wav(Number(env.RB_FAKE_WAV_MS || 1000)).toString('base64') }));
   };
 `;
@@ -108,12 +117,14 @@ function run(env, script) {
 // the player quit at once. Nothing more can ever be heard, yet every chunk was
 // still synthesized and paid for, and the worker logged "spoke 11 of 11".
 test('a player that quits early stops the spending and is reported, not logged as spoken', { timeout: 40000 }, () => {
-  const { out, count } = run({ RB_FAKE_PLAYER: 'exit', RB_FAKE_SYNTH_MS: '150' }, `
+  const { out, count } = run({ RB_FAKE_PLAYER: 'exit' }, `
     return await speak(${JSON.stringify(reply(11))}, readAgentState('claude'), { wait: true, queue: true });
   `);
-  assert.ok(count('synthesize') <= 3, `synthesized ${count('synthesize')} of 11 chunks for a player that was gone`);
+  // The player quits once the first chunk reaches it, while the second is being
+  // synthesized. Nothing after that second one is bought.
+  assert.equal(count('synthesize'), 2, `synthesized ${count('synthesize')} of 11 chunks for a player that was gone`);
   assert.equal(out.playerFailed, 3);
-  assert.ok(out.spoken < 11);
+  assert.equal(out.spoken, 1);
 });
 
 // The player is PowerShell; anywhere else it cannot start. That used to come

@@ -52,7 +52,20 @@ function sandbox() {
     });
     assert.equal(r.status, 0, r.stderr);
   };
-  return { dir, spoken, hook, done: () => rmSync(dir, { recursive: true, force: true }) };
+  // Every worker ends with one "worker..." line saying what it did. Waiting for
+  // them means no detached worker is still writing into the sandbox (and
+  // re-creating it) when it is removed.
+  const log = path.join(cache, 'readback.log');
+  const settle = async (workers) => {
+    const ended = () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter((l) => /\] worker[: ]/.test(l)).length : 0);
+    const deadline = Date.now() + 10000;
+    while (ended() < workers && Date.now() < deadline) await sleep(50);
+  };
+  const done = async (workers) => {
+    await settle(workers);
+    rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  };
+  return { dir, spoken, hook, settle, done };
 }
 
 // Claude Code's hook docs: read-aloud hooks should use last_assistant_message,
@@ -70,7 +83,7 @@ test('the Claude hook speaks the reply Claude Code hands it, without the transcr
     while (!s.spoken().length && Date.now() < deadline) await sleep(50);
     assert.deepEqual(s.spoken(), ['Fresh reply from the hook payload.']);
   } finally {
-    s.done();
+    await s.done(1);
   }
 });
 
@@ -81,10 +94,10 @@ test('a duplicate fire of the same Claude reply is spoken once', { timeout: 3000
       transcript_path: path.join(s.dir, 'none.jsonl'), last_assistant_message: 'Only once, please.' };
     s.hook(payload);
     s.hook(payload);
-    await sleep(3000);
+    await s.settle(2);
     assert.deepEqual(s.spoken(), ['Only once, please.']);
   } finally {
-    s.done();
+    await s.done(2);
   }
 });
 

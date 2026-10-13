@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync, rmSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -234,12 +234,16 @@ test('the sweep still finds players when the folder has brackets in its name', {
     try { player.kill(); } catch {}
     process.stdout.write(JSON.stringify({ before, dead }));
   `);
-  const r = spawnSync(process.execPath, [child], {
-    encoding: 'utf8', windowsHide: true, timeout: 25000,
-    env: { ...process.env, READBACK_STATE_DIR: cache, READBACK_CACHE_DIR: cache },
-  });
-  assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout), { before: true, dead: true });
+  try {
+    const r = spawnSync(process.execPath, [child], {
+      encoding: 'utf8', windowsHide: true, timeout: 25000,
+      env: { ...process.env, READBACK_STATE_DIR: cache, READBACK_CACHE_DIR: cache },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { before: true, dead: true });
+  } finally {
+    rmSync(cache, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
 
 // A marker untouched for two minutes is swept as garbage, but a sleep or a
@@ -269,5 +273,6 @@ test('a live player puts its marker back after it was swept', { ...WINDOWS_ONLY,
     writeFileSync(path.join(streamDir, 'end.marker'), '0');
     try { player.kill(); } catch {}
     forgetPlayer(player.pid);
+    rmSync(streamDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });

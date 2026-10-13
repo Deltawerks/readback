@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -107,16 +108,21 @@ test('independent worker gets non-ASCII paths, arguments and environment intact'
   skip: process.platform !== 'win32', timeout: 20000,
 }, async () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'readback-José-ünï-'));
-  const worker = path.join(dir, 'wörker.cjs');
-  writeFileSync(worker, `
-    require('node:fs').writeFileSync(require('node:path').join(__dirname, 'received.json'),
-      JSON.stringify({ arg: process.argv[2], env: process.env.RB_UNICODE_FIXTURE }));
-  `);
-  const { launchIndependentNode } = await import('../src/independent-process.js');
-  await launchIndependentNode(worker, ['Señor ✓'], { ...process.env, RB_UNICODE_FIXTURE: 'Zoë ✓ 日本' });
-  const received = path.join(dir, 'received.json');
-  const deadline = Date.now() + 10000;
-  while (!existsSync(received) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
-  assert.ok(existsSync(received), 'the worker never ran: its path was garbled on the way');
-  assert.deepEqual(JSON.parse(readFileSync(received, 'utf8')), { arg: 'Señor ✓', env: 'Zoë ✓ 日本' });
+  try {
+    const worker = path.join(dir, 'wörker.cjs');
+    writeFileSync(worker, `
+      require('node:fs').writeFileSync(require('node:path').join(__dirname, 'received.json'),
+        JSON.stringify({ arg: process.argv[2], env: process.env.RB_UNICODE_FIXTURE }));
+    `);
+    const { launchIndependentNode } = await import('../src/independent-process.js');
+    await launchIndependentNode(worker, ['Señor ✓'], { ...process.env, RB_UNICODE_FIXTURE: 'Zoë ✓ 日本' });
+    const received = path.join(dir, 'received.json');
+    const deadline = Date.now() + 10000;
+    while (!existsSync(received) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+    assert.ok(existsSync(received), 'the worker never ran: its path was garbled on the way');
+    assert.deepEqual(JSON.parse(readFileSync(received, 'utf8')), { arg: 'Señor ✓', env: 'Zoë ✓ 日本' });
+  } finally {
+    // Not rmSync, which quietly leaves a non-ASCII path in place.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });
