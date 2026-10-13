@@ -123,8 +123,10 @@ Claude Code**, say "voice on", and the next reply should speak.
 
 Use a current Codex desktop/CLI version with lifecycle hooks. ReadBack uses the
 documented `Stop` event and its `last_assistant_message`, `session_id` and
-`turn_id` fields for speech. It checks matching session/turn metadata in the saved
-transcript to exclude background suggestions; it does not scrape the screen. See [OpenAI's hook documentation](https://learn.chatgpt.com/docs/hooks).
+`turn_id` fields for speech. It also reads session and turn metadata from the
+chat transcript named in the event's `transcript_path`, to skip background turns
+(see [Codex background turns](#codex-background-turns-and-playback-lifetime));
+it does not read the screen. See [OpenAI's hook documentation](https://learn.chatgpt.com/docs/hooks).
 
 ```powershell
 npm run register:codex
@@ -225,26 +227,40 @@ terminal that runs it.
 
 ### Codex background turns and playback lifetime
 
-Composer predictions (the gray suggested next message), subagents, ephemeral
-sessions, and turns whose origin cannot be verified stay silent. Automatic Codex
-speech requires a saved main-chat transcript with the matching session and turn.
-ReadBack checks the session header and searches backward from the newest records,
-so accumulated chat history has no total-size cutoff. Window focus is not used
-to decide whether a reply should speak.
-The spoken text still comes from the Stop event's `last_assistant_message`.
-The provenance check uses current transcript metadata because Stop does not
-expose the turn trigger; future Codex metadata changes may need a compatibility
-update. Manual MCP speech remains available.
+Codex fires `Stop` for more than the replies you asked for, so ReadBack checks
+where each turn came from before speaking it. The event must be a main-thread
+`Stop` with a session id, a turn id and reply text; one that names a subagent
+(`agent_id`) is ignored. ReadBack then reads two records from the chat
+transcript the event points to:
 
-On Windows, both the panel launcher and Codex speech worker use WMI to start
+- **The session header**, the transcript's first line. It must carry the same
+  session id and must not mark the session as a fork or a subagent: a
+  `thread_source` other than `user`, or a structured `source`, means silence.
+  Composer predictions (the gray suggested next message) run in ephemeral forks
+  like this.
+- **The turn's `task_started` record**, found by searching backward from the
+  newest records, so a long chat's history has no total-size cutoff. A turn
+  started by another agent (`initiating_agent_path`) stays silent, and so does a
+  turn whose `turn_trigger` is present but is not `composer`, `cli` or `exec`. A
+  turn whose record carries no attribution at all is spoken.
+
+If the event names no transcript, the transcript cannot be read, or the turn is
+not in it, the reply stays silent. Window focus plays no part. The spoken text
+still comes from the Stop event's `last_assistant_message`; the transcript is
+read only for these fields. Stop does not expose the turn trigger itself, so
+the check depends on Codex's current transcript format, and a future Codex
+release may need a compatibility update. Manual MCP speech is not affected.
+
+On Windows, both the panel launcher and the Codex speech worker use WMI to start
 outside the calling app's process job. This lets playback finish when Codex
 completes its turn and cleans up the hook. A normal Node detached child still
 belongs to that job and can be terminated with it.
 
 Reply text travels in a single-use file in the user's ReadBack cache, which the
-worker removes after reading. Environment variables travel through the launcher
-in memory, never in command-line arguments or the reply file. Stop, master mute,
-and per-agent mute continue to use the shared queue and player controls.
+worker removes after reading. Environment variables reach the worker through the
+launcher's standard input, never in command-line arguments or the reply file.
+Stop, master mute, and per-agent mute continue to use the shared queue and
+player controls.
 
 ## Using it
 
