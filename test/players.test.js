@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -12,8 +12,10 @@ process.env.READBACK_STATE_DIR = DIR;
 process.env.READBACK_CACHE_DIR = DIR;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const { PLAYERS_DIR, LIVE_MS, pidAlive, recordPlayer, livePlayers, killPlayers, sweepPlayers, markerPath } =
+const { PLAYERS_DIR, LIVE_MS, pidAlive, recordPlayer, forgetPlayer, livePlayers, killPlayers, sweepPlayers, markerPath } =
   await import('../src/players.js');
+// These drive real PowerShell processes, which only exist on Windows.
+const WINDOWS_ONLY = { skip: process.platform !== 'win32' };
 const { claim, isClaimed } = await import('../src/claims.js');
 const { enqueue, releaseTicket } = await import('../src/queue.js');
 const { newStreamDir } = await import('../src/audio.js');
@@ -83,7 +85,7 @@ test('a live marker counts; a stale or dead one is dropped', () => {
 
 // Windows recycles pids within seconds. A kill by pid alone would hit whatever
 // now owns the number; a kill checked against the recorded start time cannot.
-test('a kill only lands on the process the marker recorded', async () => {
+test('a kill only lands on the process the marker recorded', WINDOWS_ONLY, async () => {
   const child = sleeper('Start-Sleep -Seconds 40');
   try {
     await sleep(700); // let PowerShell come up so Get-Process can see it
@@ -108,7 +110,7 @@ test('a kill only lands on the process the marker recorded', async () => {
 
 // The sweep used to match any command line containing the script's file name,
 // killing shells and editors and its own PowerShell, which aborted it half way.
-test('the sweep kills a real player and nothing that merely mentions the script', async () => {
+test('the sweep kills a real player and nothing that merely mentions the script', WINDOWS_ONLY, async () => {
   const bystander = sleeper(`$x = '${STREAM_SCRIPT}'; Start-Sleep -Seconds 40`);
   // A real player that belongs to a DIFFERENT cache dir must survive our sweep.
   const otherPlayersDir = mkdtempSync(path.join(tmpdir(), 'readback-other-players-'));
@@ -158,7 +160,7 @@ test('two tickets or stream dirs from one process in the same millisecond do not
   assert.equal(readdirSync(DIR).filter((f) => f.startsWith('stream-')).length, 1);
 });
 
-test('muting one agent stops its marked and unmarked players without stopping the other agent', async () => {
+test('muting one agent stops its marked and unmarked players without stopping the other agent', WINDOWS_ONLY, async () => {
   const { stopPlayback } = await import('../src/audio.js');
   const children = [];
   try {
@@ -178,4 +180,34 @@ test('muting one agent stops its marked and unmarked players without stopping th
       else assert.ok(pidAlive(c.pid), 'Claude must keep playing');
     }
   } finally { for (const {c} of children) { try { c.kill(); } catch {} } }
+});
+
+// A marker untouched for two minutes is swept as garbage, but a sleep or a
+// hung audio device can do that to a player that is still alive. It used to
+// stay gone, so the queue let the next reply start on top of it and Stop could
+// reach it only through the slower command-line sweep.
+test('a live player puts its marker back after it was swept', { ...WINDOWS_ONLY, timeout: 20000 }, async () => {
+  mkdirSync(PLAYERS_DIR, { recursive: true });
+  const streamDir = mkdtempSync(path.join(tmpdir(), 'readback-marker-'));
+  // Started without a marker, exactly as if it had been swept already.
+  const player = spawn(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', STREAM_SCRIPT, '-Dir', streamDir, '-PlayersDir', PLAYERS_DIR, '-Agent', 'codex'],
+    { stdio: 'ignore', windowsHide: true }
+  );
+  try {
+    const marker = markerPath(player.pid);
+    const deadline = Date.now() + 10000;
+    while (!existsSync(marker) && Date.now() < deadline) await sleep(100);
+    assert.ok(existsSync(marker), 'the player wrote its marker back');
+    const data = JSON.parse(readFileSync(marker, 'utf8'));
+    assert.equal(data.pid, player.pid);
+    assert.equal(data.agent, 'codex');
+    assert.ok(Math.abs(data.started - Date.now()) < 15000, 'it records its own start time, so a kill can verify it');
+    assert.ok(livePlayers().some((p) => p.pid === player.pid && p.agent === 'codex'));
+  } finally {
+    writeFileSync(path.join(streamDir, 'end.marker'), '0');
+    try { player.kill(); } catch {}
+    forgetPlayer(player.pid);
+  }
 });

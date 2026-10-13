@@ -16,6 +16,11 @@ param(
 # what makes "stop" find this process and what keeps a reused pid from being
 # mistaken for it. It cannot touch during PlaySync, which is fine: one chunk is
 # a single sentence.
+#
+# A sleep or a hung audio device can leave the marker untouched long enough to
+# be swept while this player is still alive. Then it writes the marker back,
+# with its own start time so a kill can still confirm it is aiming at this
+# process; otherwise the queue would let the next reply start on top of it.
 try {
   $i = 0
   $total = -1
@@ -24,6 +29,8 @@ try {
   $marker = ''
   if ($PlayersDir -ne '') { $marker = Join-Path $PlayersDir "$PID" }
   $lastTouch = [DateTime]::MinValue
+  $started = 0
+  try { $started = ([DateTimeOffset](Get-Process -Id $PID).StartTime.ToUniversalTime()).ToUnixTimeMilliseconds() } catch { }
 
   function Touch-Marker {
     if ($marker -eq '') { return }
@@ -32,6 +39,9 @@ try {
     $script:lastTouch = $now
     try {
       if (Test-Path -LiteralPath $marker) { [IO.File]::SetLastWriteTimeUtc($marker, $now) }
+      elseif (Test-Path -LiteralPath $PlayersDir) {
+        [IO.File]::WriteAllText($marker, ('{"pid":' + $PID + ',"started":' + $started + ',"agent":"' + $Agent + '"}'))
+      }
     } catch { }
   }
 
