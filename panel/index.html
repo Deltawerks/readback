@@ -95,6 +95,7 @@
   .cost { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin: -12px 0 14px; }
   .cost:empty { display: none; }
   .cost a { color: var(--blue-2); }
+  .cost.warn { color: var(--warn); }
   .switch-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .switch-row .lbl2 { font-family: var(--body); font-size: 12px; color: var(--muted); letter-spacing: .3px; }
   .toggle.sm { --w: 48px; --h: 26px; }
@@ -158,8 +159,10 @@
       <button id="preview" class="icon" aria-label="Preview voice" title="Preview"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg></button>
     </div>
 
-    <label class="lbl" for="model">Model</label>
-    <div class="mb"><select id="model"></select></div>
+    <div id="modelBlock">
+      <label class="lbl" for="model">Model</label>
+      <div class="mb"><select id="model"></select></div>
+    </div>
     <div id="cost" class="cost"></div>
 
     <div id="tuning"></div>
@@ -172,15 +175,17 @@
       <button id="stop" class="icon" aria-label="Stop playback" title="Stop"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button>
     </div>
 
-    <div class="rule"></div>
+    <div id="keyBlock">
+      <div class="rule"></div>
 
-    <label class="lbl" id="keyLabel" for="apiKey">API key</label>
-    <div class="row">
-      <input type="password" id="apiKey" placeholder="Paste your key…" autocomplete="off" spellcheck="false" />
-      <button id="saveKey" class="btn">Save</button>
+      <label class="lbl" id="keyLabel" for="apiKey">API key</label>
+      <div class="row">
+        <input type="password" id="apiKey" placeholder="Paste your key…" autocomplete="off" spellcheck="false" />
+        <button id="saveKey" class="btn">Save</button>
+      </div>
+      <div class="keyState" id="keyState">checking…</div>
+      <div class="keyState" id="keyEnv"></div>
     </div>
-    <div class="keyState" id="keyState">checking…</div>
-    <div class="keyState" id="keyEnv"></div>
 
     <div class="foot">
       <span id="dot" class="dot off"></span>
@@ -360,9 +365,14 @@ async function switchProvider(id) {
   await patchTop({ agent: selectedAgent, provider: id }, '/api/agent');
   await renderAll();
 }
+// The free voice has no key and no model to pick; the paid ones have both.
+function needsKey(provider = prov()) {
+  return !meta[provider] || meta[provider].needsKey !== false;
+}
 function renderModels() {
   const sel = $('model'); sel.innerHTML = '';
   const models = (meta[prov()] && meta[prov()].models) || [];
+  $('modelBlock').hidden = !models.length;
   const have = new Set();
   const add = (id, label) => { if (have.has(id)) return; have.add(id); const o = document.createElement('option'); o.value = id; o.textContent = label; if (id === cfg().modelId) o.selected = true; sel.appendChild(o); };
   if (cfg().modelId && !models.some((m) => m.id === cfg().modelId)) add(cfg().modelId, cfg().modelId);
@@ -382,6 +392,22 @@ const MODEL_NOTE = new Map([
 ]);
 function renderCost() {
   const box = $('cost');
+  box.classList.remove('warn');
+  if (!needsKey()) {
+    // The free voice: say whether it is downloaded, and warn a PC that makes
+    // speech slower than it plays, since its replies will pause.
+    const st = (meta[prov()] && meta[prov()].status) || {};
+    if (!st.installed) {
+      box.classList.add('warn');
+      box.textContent = 'Not downloaded yet. Run npm run add-free-voice in the ReadBack folder (about 700 MB).';
+    } else if (typeof st.xRealtime === 'number' && st.xRealtime < 1) {
+      box.classList.add('warn');
+      box.textContent = 'This PC makes speech slower than it plays (' + st.xRealtime + 'x), so replies will pause. Inworld or ElevenLabs will sound smoother.';
+    } else {
+      box.textContent = 'Free · runs on this PC' + (typeof st.xRealtime === 'number' ? ' · ' + st.xRealtime + 'x faster than it plays' : '');
+    }
+    return;
+  }
   const note = prov() === 'inworld' ? MODEL_NOTE.get(cfg().modelId) : '';
   box.textContent = (note ? note + ' · ' : '') + 'Billed per character';
   const url = PRICING_URL[prov()];
@@ -447,6 +473,7 @@ function renderTuning() {
 }
 function renderKey() {
   const m = meta[prov()] || {};
+  $('keyBlock').hidden = !needsKey();
   $('keyLabel').textContent = (m.label || '') + ' API key · shared';
   $('apiKey').value = '';
   renderKeyState();
@@ -524,7 +551,7 @@ let voicesRequest = 0;
 async function loadVoices() {
   const request = ++voicesRequest, agent = selectedAgent, provider = prov();
   fillVoices([]);
-  if (!keys[provider]?.hasKey) { renderStatus(); return; }
+  if (needsKey(provider) && !keys[provider]?.hasKey) { renderStatus(); return; }
   try {
     const { voices } = await api('/api/voices?agent=' + agent + '&provider=' + provider, undefined, SLOW_TIMEOUT_MS);
     if (request !== voicesRequest || agent !== selectedAgent || provider !== prov()) return;
@@ -554,6 +581,8 @@ async function renderAll() {
 function renderPoll() {
   if (drawn.provider !== prov()) { renderAll(); return; }
   if (drawn.modelId !== cfg().modelId) { renderModels(); renderTuning(); }
+  // The free voice's line changes once it is downloaded or timed.
+  if (!needsKey()) renderCost();
   markActiveProvider(); renderKeyState(); renderStatus(); renderDucking();
 }
 
