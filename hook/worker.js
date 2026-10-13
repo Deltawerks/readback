@@ -71,6 +71,8 @@ async function main() {
   const via = `${st.provider}/${activeConfig(st).voiceId}`;
   if (result.aborted) {
     log(`worker: reply not spoken (voice off or stopped while waiting) via ${via}`);
+  } else if (result.playerFailed !== undefined) {
+    log(`worker: the audio player quit early (exit ${result.playerFailed}), so the reply stopped after ${result.spoken} of ${result.total} chunks via ${via}`);
   } else {
     const note = result.truncated ? ', cut short by a synthesis error' : '';
     log(`worker: spoke ${result.spoken} of ${result.total} chunks (${clean.length} chars) via ${via}${note}`);

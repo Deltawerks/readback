@@ -94,6 +94,30 @@ export function writeEndMarker(dir, count) {
   }
 }
 
+// How long a WAV chunk plays: its data size over the byte rate in its fmt
+// chunk. 0 when the bytes are not a WAV whose header can be read.
+export function wavDurationMs(buf) {
+  try {
+    if (!Buffer.isBuffer(buf) || buf.length < 12) return 0;
+    if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') return 0;
+    let byteRate = 0;
+    for (let off = 12; off + 8 <= buf.length; ) {
+      const id = buf.toString('ascii', off, off + 4);
+      const size = buf.readUInt32LE(off + 4);
+      if (id === 'fmt ' && off + 20 <= buf.length) byteRate = buf.readUInt32LE(off + 16);
+      if (id === 'data') {
+        // A streamed WAV can leave the size unset; count what is actually there.
+        const bytes = size && off + 8 + size <= buf.length ? size : buf.length - off - 8;
+        return byteRate ? (bytes / byteRate) * 1000 : 0;
+      }
+      off += 8 + size + (size % 2);
+    }
+  } catch {
+    // unreadable header
+  }
+  return 0;
+}
+
 // Spawn the single streaming player for a directory. Hidden console (NOT
 // detached, because on Windows detached gives powershell.exe no console and it
 // silently fails to run). Returns the child; the caller either unref()s it

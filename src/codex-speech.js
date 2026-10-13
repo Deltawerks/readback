@@ -28,6 +28,8 @@ export async function speakCodexReply(payload, playback = speak) {
   const via = `${st.provider}/${activeConfig(st).voiceId}`;
   if (result.aborted) {
     log(`codex-worker: reply stopped or muted via ${via}`);
+  } else if (result.playerFailed !== undefined) {
+    log(`codex-worker: the audio player quit early (exit ${result.playerFailed}), so the reply stopped after ${result.spoken} of ${result.total} chunks via ${via}`);
   } else {
     log(`codex-worker: spoke ${result.spoken} of ${result.total} chunks (${clean.length} chars) via ${via}${result.truncated ? ', cut short by a synthesis error' : ''}`);
   }

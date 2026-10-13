@@ -7,6 +7,7 @@ import {
   writeChunk,
   writeEndMarker,
   stopPlayback,
+  wavDurationMs,
 } from './audio.js';
 import { readAgentState, writeState, StateUnreadableError } from './state.js';
 import { enqueue, releaseTicket, waitTurn, currentEpoch, flushQueue } from './queue.js';
@@ -14,6 +15,14 @@ import { log } from './log.js';
 
 // Spoken when a reply cannot be finished, so a cut-off never passes for the end.
 const CUT_SHORT_CUE = 'The rest is on screen.';
+
+// How far synthesis may run ahead of what is playing. Plenty to hide a slow
+// provider, and small enough that a stop or a voice-off part way through a long
+// reply saves the rest of the bill. Synthesizing as fast as the provider
+// answered paid for a ten-minute reply within its first minute.
+const LOOKAHEAD_MS = 30 * 1000;
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Speak text with low latency: split into sentence chunks, start playing the
 // first as soon as it's synthesized, and prefetch the rest so they play
@@ -29,9 +38,15 @@ const CUT_SHORT_CUE = 'The rest is on screen.';
 //   queue so multiple sessions read in order instead of stomping each other.
 // queue:false (default): manual speech (panel/CLI) takes over immediately.
 //
-// Returns { spoken, total, aborted?, truncated? }: spoken is the number of
-// chunks actually delivered to the player, which is what the worker logs.
+// Returns { spoken, total, aborted?, truncated?, playerFailed? }: spoken is the
+// number of chunks actually delivered to the player, which is what the worker
+// logs; playerFailed is the exit code of a player that quit before the end.
 export async function speak(text, st, { wait = false, queue = false } = {}) {
+  // Playback goes through Windows PowerShell. Anywhere else the player cannot
+  // start, and that used to surface only after the whole reply was paid for.
+  if (process.platform !== 'win32') {
+    throw new Error('ReadBack plays audio through Windows PowerShell, so it cannot speak on this system');
+  }
   const chunks = chunkForSpeech(text);
   const total = chunks.length;
   if (!total) return { spoken: 0, total: 0 };
@@ -79,10 +94,12 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
     }
     // Our turn. The prior utterance has finished, so do NOT stop anything.
   } else {
-    // Manual/interactive: take over now. Kill current audio and clear the queue,
-    // then hold the line (our ticket) so incoming hook speech waits behind us.
-    stopPlayback();
+    // Manual/interactive: take over now. Clear the queue before killing the
+    // current audio: the kill takes a moment, and a queued reply that saw the
+    // line free in between would start talking. Then hold the line (our
+    // ticket) so incoming hook speech waits behind us.
     flushQueue();
+    stopPlayback();
     epoch = currentEpoch();
   }
 
@@ -91,7 +108,20 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   // Attach the close listener up front so a fast utterance can't emit 'close'
   // before we await it.
   const closed = once(player, 'close');
-  writeState({ lastPid: player.pid });
+  // A player that quits before it is told the reply is over (a script policy
+  // that blocks it, a broken audio stack) will never play another chunk, so
+  // nothing more is bought for it, and the result says what happened.
+  let playerExit = null;
+  closed.then(
+    ([code, signal]) => { playerExit = code ?? signal ?? 'unknown'; },
+    (err) => { playerExit = err.code || 'failed to start'; }
+  );
+  const playerAlive = () => playerExit === null;
+  try {
+    writeState({ lastPid: player.pid });
+  } catch {
+    // informational only; never worth abandoning a reply over
+  }
   // Release our ticket the instant playback ends (in every mode, including
   // wait:false where the player outlives this function), so the next in line
   // can start.
@@ -128,26 +158,41 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
     abandon();
     return aborted();
   }
+  if (!playerAlive()) {
+    abandon();
+    return { spoken: 0, total, playerFailed: playerExit };
+  }
 
-  // Remaining chunks pipeline while the first plays. Every iteration re-checks
-  // the line: a voice-off mid-reply used to stop the audio while this loop kept
-  // paying the provider for every remaining sentence.
+  // Remaining chunks pipeline while the first plays, staying LOOKAHEAD_MS
+  // ahead of the estimated playhead. Every step re-checks the line: a voice-off
+  // mid-reply used to stop the audio while this loop kept paying the provider
+  // for every remaining sentence.
   let written = 1;
   let truncated = false;
+  let playerFailed;
+  let queuedMs = wavDurationMs(first);
+  const playStarted = Date.now();
   const rest = (async () => {
     try {
       for (let i = 1; i < total; i++) {
+        while (queuedMs - (Date.now() - playStarted) > LOOKAHEAD_MS && lineStillOurs() && playerAlive()) {
+          await sleep(250);
+        }
         if (!lineStillOurs()) return;
+        if (!playerAlive()) { playerFailed = playerExit; return; }
         const audio = await synthesize(chunks[i], st);
-        if (!lineStillOurs() || !writeChunk(dir, i, audio)) return;
+        if (!lineStillOurs()) return;
+        if (!playerAlive()) { playerFailed = playerExit; return; }
+        if (!writeChunk(dir, i, audio)) return;
         written = i + 1;
+        queuedMs += wavDurationMs(audio);
       }
     } catch (err) {
       truncated = true;
       log(`speak: chunk ${written + 1} of ${total} failed, cutting the reply short: ${err && err.message}`);
       // Say so out loud, so a cut-off never passes for the end of the reply.
       try {
-        if (lineStillOurs() && writeChunk(dir, written, await synthesize(CUT_SHORT_CUE, st))) written += 1;
+        if (lineStillOurs() && playerAlive() && writeChunk(dir, written, await synthesize(CUT_SHORT_CUE, st))) written += 1;
       } catch {
         // the provider is down; the log line above is all we can do
       }
@@ -163,6 +208,6 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   }
 
   await rest;
-  await closed;
-  return { spoken: written, total, truncated };
+  await closed.catch(() => {});
+  return { spoken: written, total, truncated, ...(playerFailed !== undefined && { playerFailed }) };
 }
