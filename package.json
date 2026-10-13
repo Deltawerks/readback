@@ -1,6 +1,6 @@
 {
   "name": "readback",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "Windows voice for Claude and Codex. Reads replies aloud with Inworld or ElevenLabs through a shared queue, lowers your other audio while anyone is talking, and has a local control panel.",

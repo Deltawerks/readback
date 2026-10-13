@@ -14,10 +14,12 @@ desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
 
 - **Windows only.** Plays through Windows' built-in audio (PowerShell's
   SoundPlayer), so there is no ffmpeg, mpv or VLC to install.
-- **Two providers.** [Inworld](https://inworld.ai) and
+- **Two paid providers, or a free voice.** [Inworld](https://inworld.ai) and
   [ElevenLabs](https://elevenlabs.io), switchable in a click. The voice picker
   lists up to 200 of Inworld's English voices, or the voices on your ElevenLabs
-  account. Both bill per character spoken.
+  account. Both bill per character spoken. Or the optional
+  [free voice](#free-voice), Kokoro, which runs on your PC with no key and no
+  bill (English only).
 - **GUI-tunable.** A little control panel for voice, model, speed and
   delivery, with separate Claude/Codex tabs, a live voice picker and in-app key entry. No `.env` fiddling.
 - **Streaming.** Splits replies into sentences and starts talking on the first
@@ -29,7 +31,11 @@ desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
   while you dictate, then come back. Off until you switch it on.
 
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic, OpenAI,
-> Inworld, or ElevenLabs.
+> Inworld, ElevenLabs, or the Kokoro project.
+
+**New in 0.8.0:** an optional [free voice](#free-voice) that runs on your PC.
+Nothing changes unless you install it. After `git pull`, restart the panel and
+any open Claude or Codex sessions.
 
 **Upgrading from 0.5.x?** 0.7.0 adds Codex support, separate Claude and Codex
 voice profiles, Inworld TTS-2 and optional music ducking. Your voices, speeds
@@ -67,7 +73,9 @@ npm run panel        # opens the control panel in your browser
 ```
 
 In the panel: pick a **provider**, paste that provider's **API key**, choose a
-**voice**, enable master speech and that agent, and hit ▶ to hear it. Then connect Claude Code, Codex, or both.
+**voice**, enable master speech and that agent, and hit ▶ to hear it. No key?
+Run `npm run add-free-voice` once and pick **Free (Kokoro)** instead (see
+[Free voice](#free-voice)). Then connect Claude Code, Codex, or both.
 
 ### Claude Code setup
 
@@ -314,6 +322,36 @@ no panel control for it, and a blank or invalid value is ignored.
 > lost if you roll back; delete them once you've confirmed things still work.
 > Nothing is copied when `READBACK_STATE_DIR` is set.
 
+## Free voice
+
+The **Free (Kokoro)** provider speaks with
+[Kokoro](https://huggingface.co/hexgrad/Kokoro-82M), an open voice model
+(Apache 2.0) that runs on your own PC through
+[kokoro-js](https://www.npmjs.com/package/kokoro-js). No key, no account, no
+bill, and the reply text never leaves your machine. It is optional, and none of
+it is downloaded until you ask:
+
+```powershell
+npm run add-free-voice
+```
+
+That installs its packages into `free-voice\` (about 400 MB, pinned by
+`free-voice\package-lock.json`), downloads the model into `free-voice\models`
+(about 310 MB), then times a sentence and tells you how fast your PC makes
+speech. Then pick **Free (Kokoro)** in the panel. If you use Inworld or
+ElevenLabs, none of it is ever downloaded or loaded.
+
+- **Speed.** On a 24-core desktop it makes speech about 4.5 times faster than
+  it plays, using up to four cores while it talks and none otherwise. On slower
+  PCs the first word takes longer. If your PC makes speech slower than it
+  plays, the panel says so, because replies will pause.
+- **Memory.** About 550 MB while the model is loaded, up to about 900 MB while
+  it talks. Each reply's worker lets go of it when the reply ends; the panel and
+  the MCP server let go after 10 quiet minutes.
+- **English only.** 28 American and British voices, listed best first by the
+  grade Kokoro's authors give each one. Heart is the default.
+- **To remove it,** delete `free-voice\node_modules` and `free-voice\models`.
+
 ## Ducking (Windows)
 
 Switch on **Ducking** in the panel and ReadBack gets out of your way:
@@ -376,6 +414,8 @@ With ducking on, ReadBack sets its own playback level on every reply: full, or t
 - **What leaves your machine:** synthesis and the voice list call out, by
   design. Your cleaned, truncated reply text and your API key go to whichever
   provider you picked (Inworld or ElevenLabs) over HTTPS, and nowhere else.
+  The free voice sends nothing anywhere: its install step downloads packages
+  from npm and the model from Hugging Face, and after that it runs offline.
   ReadBack has no servers, no telemetry, no analytics, and no update check.
 - **MCP tools and untrusted content.** If your assistant reads untrusted content
   (web pages, issues, files from strangers), don't auto-approve ReadBack's
@@ -414,9 +454,10 @@ may flag them:
   do not synthesize anything, so automatic speech bills nothing. No STT / voice
   input.
 - Speech is provider-agnostic WAV under the hood (Inworld LINEAR16; ElevenLabs
-  PCM wrapped in a WAV header), so the streaming player never cares which
-  provider you're on.
-- **It costs money per character spoken.** Both providers bill per character;
+  PCM wrapped in a WAV header; Kokoro's samples converted to 16-bit PCM), so
+  the streaming player never cares which provider you're on.
+- **The paid providers cost money per character spoken** (the free voice costs
+  only CPU time). Both bill per character;
   see [Inworld's pricing](https://inworld.ai/pricing) and
   [ElevenLabs' API pricing](https://elevenlabs.io/pricing/api) for current
   rates. Previews, the panel's Speak button and the MCP `say` tool are billed
@@ -434,7 +475,9 @@ may flag them:
 ## Tests
 
 `npm test` runs the test suite. No test calls Inworld or ElevenLabs, and none
-changes real audio levels. `npm run test:audio` runs the Windows audio
+changes real audio levels. The free voice's tests that need its model run only
+where `npm run add-free-voice` has installed it; they make speech on the CPU
+and never play it. `npm run test:audio` runs the Windows audio
 integration tests: they play a silent test tone and briefly change that test
 app's per-app volume, never another app's. If ReadBack's own ducking is
 switched on, switch it off before running them.
@@ -444,7 +487,7 @@ switched on, switch it off before running them.
 ReadBack is a DeltaWerks project built with contributions from multiple AI coding assistants:
 
 - **DeltaWerks** - project creator, product direction, design, and real-world testing.
-- **Claude (Anthropic)** - the original Claude integration, earlier speech, queue, and settings-reliability work, and voice-aware ducking in 0.7.
+- **Claude (Anthropic)** - the original Claude integration, earlier speech, queue, and settings-reliability work, voice-aware ducking in 0.7, and the free voice in 0.8.
 - **Codex (OpenAI)** - Codex integration, independent Claude/Codex profiles, Inworld TTS-2 controls, Windows playback-lifetime fixes, regression tests, and documentation for the 0.6 work that shipped in 0.7.0.
 
 ## License

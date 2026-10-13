@@ -4,6 +4,22 @@ Dates are the git tag date for tagged versions. Versions that were never
 tagged (0.1.0 to 0.3.0, and the 0.6 line, which shipped inside 0.7.0) are
 dated from the commit history; 0.1.0 predates it.
 
+## 0.8.0 (2026-10-13)
+
+Adds an optional free voice. Nothing changes for Inworld or ElevenLabs users, and nothing new is downloaded unless you ask for it.
+
+### Added
+
+- **Free voice.** A third provider, **Free (Kokoro)**, speaks with Kokoro, an open voice model that runs on your PC: no key, no bill, and the reply text never leaves your machine. `npm run add-free-voice` installs it into `free-voice\`: about 400 MB of packages, pinned by their own lockfile, and a 310 MB model. Then it times a sentence and tells you how fast your PC makes speech.
+- **28 English voices,** American and British, listed best first by the grade Kokoro's authors give each one.
+- **In the panel,** the free voice has no key box and no model picker. The panel says when it is not downloaded yet, and warns when your PC makes speech slower than it plays.
+- **Light on the PC.** It runs the full-precision model on at most four threads, which made speech about 4.5 times faster than it plays on a 24-core desktop; the 8-bit model was three times slower on the CPU. The panel and the MCP server give its memory back after 10 quiet minutes, and a reply that finds the model missing says to reinstall rather than downloading it mid-sentence.
+- **Never sees your keys.** The free voice is never handed an Inworld or ElevenLabs key.
+
+### Upgrading
+
+No `npm install` is needed: ReadBack's own dependencies did not change. Restart the panel and any open Claude Code or Codex sessions so their ReadBack MCP server reloads. To try the free voice, run `npm run add-free-voice`.
+
 ## 0.7.1 (2026-10-12)
 
 A patch release that comes out of a review of the whole project by five independent reviewers, and a final review of the fixes. There are no new features. Everyone on 0.7.0 should upgrade.
