@@ -184,6 +184,38 @@ test('the settings lock actually serializes writers', async () => {
   assert.equal(overlaps.length, 0, `writers were inside the lock at the same time: ${overlaps.join(', ')}`);
 });
 
+// On Windows, creating the lock while its last holder is still deleting it (a
+// waiter had it open to check its age) fails with EPERM, not EEXIST. That was
+// taken for "cannot lock here at all" and the write went ahead without the
+// lock. Eight writers each add one to a shared counter twenty-five times, the
+// same read-modify-write the lock guards in state.json: it lost up to four
+// updates in five. Counting avoids clocks, which differ between processes by
+// more than a lock handoff takes.
+test('the settings lock holds under heavy contention', { timeout: 60000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-lock-load-'));
+  const mod = JSON.stringify(pathToFileURL(path.join(ROOT, 'src', 'state.js')).href);
+  const env = { READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: dir };
+  const counter = path.join(dir, 'counter.txt');
+  writeFileSync(counter, '0');
+  const ids = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+  const results = await Promise.all(ids.map(() =>
+    runChild(`
+      const { withSettingsLock } = await import(${mod});
+      const fs = await import('node:fs');
+      // A scanner can hold the file for a moment; that is not what is measured.
+      const retry = (f) => { for (let i = 0; ; i++) { try { return f(); } catch (e) { if (i > 50 || !['EBUSY', 'EPERM', 'EACCES'].includes(e.code)) throw e; } } };
+      for (let i = 0; i < 25; i++) {
+        withSettingsLock(() => {
+          const n = Number(retry(() => fs.readFileSync(${JSON.stringify(counter)}, 'utf8')));
+          retry(() => fs.writeFileSync(${JSON.stringify(counter)}, String(n + 1)));
+        });
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    `, env)));
+  results.forEach((r, i) => assert.equal(r.code, 0, `lock worker ${ids[i]} crashed: ${r.err}`));
+  assert.equal(Number(readFileSync(counter, 'utf8')), ids.length * 25, 'updates were lost: writers were inside the lock together');
+});
+
 test('a settings write preserves the keys it does not carry', () => {
   writeFileSync(
     STATE_FILE,

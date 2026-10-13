@@ -149,6 +149,7 @@ const SPIN_MS = 20;
 // module should need it: every settings write already goes through writeState.
 export function withSettingsLock(fn) {
   let held = false;
+  let why = `within ${LOCK_WAIT_MS}ms`;
   const giveUpAt = Date.now() + LOCK_WAIT_MS;
   const spinUntil = Date.now() + SPIN_MS;
   for (;;) {
@@ -157,7 +158,15 @@ export function withSettingsLock(fn) {
       held = true;
       break;
     } catch (err) {
-      if (err.code !== 'EEXIST') break; // cannot lock here at all; write anyway
+      // EEXIST: someone holds it. A transient error means the same "not yet"
+      // on Windows: the last holder's delete is still pending because a waiter
+      // had the file open to check its age, and creating it again fails with
+      // EPERM. Taking that for "cannot lock here at all" let writers overlap
+      // under contention.
+      if (err.code !== 'EEXIST' && !TRANSIENT_CODES.has(err.code)) {
+        why = `here (${err.code || err.message})`;
+        break; // cannot lock here at all; write anyway
+      }
       try {
         if (Date.now() - statSync(LOCK_FILE).mtimeMs > LOCK_STALE_MS) unlinkSync(LOCK_FILE);
       } catch {
@@ -176,7 +185,7 @@ export function withSettingsLock(fn) {
     // Writing without the lock risks the clobber this exists to prevent, but a
     // voice-off that never reaches disk is worse. Take the write, and say so,
     // because this should be vanishingly rare.
-    log(`state: could not take the settings lock within ${LOCK_WAIT_MS}ms; writing without it`);
+    log(`state: could not take the settings lock ${why}; writing without it`);
   }
   try {
     return fn();
