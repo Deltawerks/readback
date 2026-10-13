@@ -4,16 +4,21 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $mcp = Join-Path $root "src\mcp-server.js"
 $hook = Join-Path $root "hook\stop-hook.js"
+# Node by its full path, as the Codex registration does: Claude Desktop does not
+# always start with this shell's PATH (nvm, fnm, a per-user install), and a hook
+# registered as plain "node" then never runs, with no error anywhere.
+$node = (Get-Command node.exe -ErrorAction Stop).Source
 
 # Escape backslashes for embedding in JSON.
 $mcpEsc = $mcp -replace '\\', '\\'
 $hookEsc = $hook -replace '\\', '\\'
+$nodeEsc = $node -replace '\\', '\\'
 
 $mcpJson = @"
 {
   "mcpServers": {
     "readback": {
-      "command": "node",
+      "command": "$nodeEsc",
       "args": ["$mcpEsc"]
     }
   }
@@ -27,7 +32,7 @@ $hookJson = @"
 {
   "hooks": {
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node", "args": ["$hookEsc"], "timeout": 15 } ] }
+      { "hooks": [ { "type": "command", "command": "$nodeEsc", "args": ["$hookEsc"], "timeout": 15 } ] }
     ]
   }
 }
@@ -36,9 +41,10 @@ $hookJson = @"
 
 Write-Host "Wrote .mcp.json and hooks-snippet.json for:"
 Write-Host "  $root"
+Write-Host "  using Node at $node (run this again if you move or upgrade Node)"
 Write-Host ""
 Write-Host "1) MCP server: in this folder Claude Code asks you to approve .mcp.json first. For it everywhere, run:"
-Write-Host "     claude mcp add readback -s user -- node `"$mcp`""
+Write-Host "     claude mcp add readback -s user -- `"$node`" `"$mcp`""
 Write-Host "     -s user = user scope: available in every project. Leave it off and you get"
 Write-Host "     local scope, which is only the folder you ran it in, while the hook keeps"
 Write-Host "     speaking everywhere else."
