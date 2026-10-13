@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -29,6 +29,41 @@ async function healthy(port) {
     return false;
   }
 }
+
+// A missing key, a bad key or no credit left all came back as "internal error",
+// hiding the provider's own message, which the provider code builds to be read.
+test("the panel shows the provider's own error, not \"internal error\"", { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-errors-'));
+  writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ enabled: true, provider: 'inworld' }));
+  const port = await freePort();
+  const env = { ...process.env };
+  delete env.INWORLD_API_KEY;
+  delete env.ELEVENLABS_API_KEY;
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'panel-server.js'), '--no-open'], {
+    env: { ...env, READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: path.join(dir, 'cache'), READBACK_PORT: String(port), READBACK_DUCKING_HELPER: 'off' },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  try {
+    const deadline = Date.now() + 15000;
+    while (!(await healthy(port)) && Date.now() < deadline) await sleep(150);
+    const base = `http://127.0.0.1:${port}`;
+    const voices = await fetch(`${base}/api/voices?agent=claude`);
+    assert.equal(voices.status, 502);
+    assert.match((await voices.json()).error, /key is not set/);
+    const say = await fetch(`${base}/api/say`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base, 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ text: 'Hello there.', agent: 'claude' }),
+    });
+    assert.equal(say.status, 502);
+    assert.match((await say.json()).error, /key is not set/);
+  } finally {
+    child.kill();
+    await sleep(300);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // Opening the browser is a convenience. When the opener cannot be started (no
 // cmd on PATH, or any system other than Windows) the failure arrives as an

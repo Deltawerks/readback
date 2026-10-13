@@ -465,6 +465,11 @@ const server = http.createServer(async (req, res) => {
       log(`panel: ${err.message}`);
       return send(res, 503, { error: 'the settings file could not be read right now; try again' });
     }
+    // The provider's own words (no key, a rejected key, no credit): shown.
+    if (err && err.fromProvider) {
+      log('panel: provider error', err.message);
+      return send(res, 502, { error: String(err.message).slice(0, 300) });
+    }
     // The message stays in the log. An fs error's text carries the user's
     // profile path, which has no business in a response.
     log('panel error', err && err.message);

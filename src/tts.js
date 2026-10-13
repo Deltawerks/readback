@@ -125,12 +125,24 @@ export async function synthesize(text, state) {
   const provider = getProvider(state.provider);
   const cfg = activeConfig(state);
   const key = getApiKey(state.provider);
-  return provider.synthesize(text, cfg, key);
+  return fromProvider(() => provider.synthesize(text, cfg, key));
 }
 
 // List voices from the active provider.
 export async function listVoices(state, opts) {
   const provider = getProvider(state.provider);
   const key = getApiKey(state.provider);
-  return provider.listVoices(key, opts);
+  return fromProvider(() => provider.listVoices(key, opts));
+}
+
+// Errors from a provider call (no key, a rejected key, no credit, a timeout)
+// are written to be read and carry no local paths, so they are marked as safe
+// to show; the panel hides every other error's text.
+async function fromProvider(call) {
+  try {
+    return await call();
+  } catch (err) {
+    if (err && typeof err === 'object') err.fromProvider = true;
+    throw err;
+  }
 }
