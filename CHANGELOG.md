@@ -6,28 +6,29 @@ dated from the commit history; 0.1.0 predates it.
 
 ## 0.7.1 (2026-10-12)
 
-A patch release that comes out of a review of the whole project by five independent reviewers. There are no new features. Everyone on 0.7.0 should upgrade.
+A patch release that comes out of a review of the whole project by five independent reviewers, and a final review of the fixes. There are no new features. Everyone on 0.7.0 should upgrade.
 
 ### Fixed: speech
 
 - **Sentence splitting.** Sentences no longer split at periods inside file names, version numbers, decimals or abbreviations (`src/state.js`, `0.7.0`, `2.5`, `e.g.`). The first thing heard from a coding reply used to be "I updated src/state."
 - **Where Claude replies come from.** They are now taken from the Stop hook's `last_assistant_message`, as Claude Code's hook documentation recommends for read-aloud hooks. They no longer come from polling the transcript for up to six seconds. Older Claude Code versions still use the transcript.
-- **Synthesis pacing.** Synthesis stays about 30 seconds ahead of playback instead of buying the whole reply at once, so a stop or voice-off part way through a long reply saves the rest of the bill.
-- **A player that quits early.** If the player quits early (for example, a script policy blocks PowerShell), synthesis stops and the log says so. Before, the whole reply was paid for and logged as spoken.
+- **Synthesis pacing.** Synthesis stays about 30 seconds ahead of playback instead of buying the whole reply at once, so a stop or voice-off part way through a long reply saves the rest of the bill. It times playback with a monotonic clock, so a system clock change mid-reply cannot stall it, and a settings file that a scanner holds for a moment is waited out instead of ending the reply.
+- **A player that quits early.** If the player quits early (for example, a script policy blocks PowerShell), synthesis stops and the log says so. Before, the whole reply was paid for and logged as spoken. The panel's Speak button and the MCP `say` tool report it too.
 - **Long queues.** A reply waiting behind more than ten minutes of speech no longer loses its place and starts on top of another reply.
 - **After sleep.** A player whose marker was swept after a sleep or a stall writes it back after the sentence it is playing, so later replies wait for it and Stop still finds it. A reply can still start during the rest of that sentence.
 - **`READBACK_MAX_CHARS`.** It now caps every reply, not only a new install's default. Blank values for it or for `READBACK_PORT` are ignored instead of being read as 0.
-- **Accented profile folders.** Codex replies are now spoken for users whose Windows profile folder has accented characters in its name. The worker launcher used to garble non-ASCII paths.
+- **Accented profile folders.** For users whose Windows profile folder has accented or other non-ASCII characters in its name (`C:\Users\José`), Codex replies are now spoken (the worker launcher used to garble the path), and old replies' audio is cleaned out of the cache again (on Node 24.12 the cleanup removed nothing there, so every reply's audio stayed on disk).
 - **Blank lines.** Text cleanup no longer slows down on replies padded with thousands of blank lines.
 
 ### Fixed: ducking
 
-- **Restore volume mid-dip.** Pressing it (or switching ducking off and on) while ReadBack was speaking could make the lowered level an app's permanent original. Every put-back is now tracked until the audio helper confirms it. Restore holds everything at full until the speech or dictation in progress ends.
-- **Hung helper.** A put-back sent to a helper that had hung was lost when the helper was replaced. It is now kept and sent to the replacement, and nothing is sent to a helper whose reports have stopped.
-- **Leftovers.** Leftover levels now match the same app on the same audio device, so an app that switched devices mid-dip is put back correctly on both. Leftovers saved by 0.7.0 still match by app name.
+- **Restore volume mid-dip.** Pressing it (or switching ducking off and on) while ReadBack was speaking could make the lowered level an app's permanent original. Every put-back is now tracked until the audio helper confirms it. Restore holds everything at full until the speech or dictation in progress ends; speech or dictation that starts after it still lowers the music, even while a microphone that was open at the time stays open.
+- **Hung helper.** A put-back sent to a helper that had hung was lost when the helper was replaced. It is now kept and sent to the replacement while the app is still lowered; a level you have meanwhile set at or above the original, or below ReadBack's, stands. Nothing is sent to a helper whose reports have stopped.
+- **Leftovers.** Leftover levels now match the same app on the same audio device, so an app that switched devices mid-dip is put back correctly on both. Leftovers saved by 0.7.0 still match by app name. A put-back that lands after its app has closed is kept as a leftover, so the app gets its level back the next time it plays, and a leftover never overrides a put-back that is still on its way.
+- **Apps that start during a dip.** The helper hears about new audio apps from Windows. Its fallback check for any it missed now runs every 10 seconds, also during a dip; it used to run only when nothing was lowered, so a missed app could stay at full volume for the whole dip.
 - **Memory.** The audio helper's memory stays flat. It used to grow by about 60 MB an hour, because Windows leaks memory when a device's sessions are listed while sessions from that same device are still held, and the helper did that every second. It no longer does.
 - **One helper.** Only one audio helper runs per Windows session. A second panel's helper refuses to start instead of fighting the first.
-- **Restarts.** A healthy helper is no longer restarted after sleep and resume. A helper that keeps failing backs off and reports PowerShell's own error message.
+- **Restarts.** A healthy helper is no longer restarted after sleep and resume. A helper that keeps failing backs off and reports PowerShell's own error message, once per reason rather than on every retry.
 
 ### Fixed: panel, setup and security
 
