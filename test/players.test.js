@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // Isolate BEFORE importing anything from src/ (paths resolve at import time).
@@ -180,6 +180,39 @@ test('muting one agent stops its marked and unmarked players without stopping th
       else assert.ok(pidAlive(c.pid), 'Claude must keep playing');
     }
   } finally { for (const {c} of children) { try { c.kill(); } catch {} } }
+});
+
+// PowerShell's -like reads [ and ] as a wildcard set, so a profile or cache
+// folder with brackets in its name made the backstop sweep match nothing.
+test('the sweep still finds players when the folder has brackets in its name', { ...WINDOWS_ONLY, timeout: 30000 }, () => {
+  const cache = mkdtempSync(path.join(tmpdir(), 'readback-[sweep] '));
+  const child = path.join(cache, 'child.mjs');
+  writeFileSync(child, `
+    import { spawn } from 'node:child_process';
+    import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+    import path from 'node:path';
+    const { PLAYERS_DIR, sweepPlayers, pidAlive } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'src', 'players.js')).href)});
+    const { STREAM_SCRIPT } = await import(${JSON.stringify(pathToFileURL(path.join(ROOT, 'src', 'config.js')).href)});
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    mkdirSync(PLAYERS_DIR, { recursive: true });
+    const stream = mkdtempSync(path.join(PLAYERS_DIR, 'stream-'));
+    const player = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', STREAM_SCRIPT,
+      '-Dir', stream, '-PlayersDir', PLAYERS_DIR], { stdio: 'ignore', windowsHide: true });
+    await sleep(1500);
+    const before = pidAlive(player.pid);
+    sweepPlayers();
+    let dead = false;
+    for (let i = 0; i < 40 && !dead; i++) { await sleep(100); dead = !pidAlive(player.pid); }
+    writeFileSync(path.join(stream, 'end.marker'), '0');
+    try { player.kill(); } catch {}
+    process.stdout.write(JSON.stringify({ before, dead }));
+  `);
+  const r = spawnSync(process.execPath, [child], {
+    encoding: 'utf8', windowsHide: true, timeout: 25000,
+    env: { ...process.env, READBACK_STATE_DIR: cache, READBACK_CACHE_DIR: cache },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout), { before: true, dead: true });
 });
 
 // A marker untouched for two minutes is swept as garbage, but a sleep or a

@@ -146,11 +146,13 @@ export function killPlayers(players) {
 // script's file name, which killed unrelated shells and editors, and matched
 // itself, which aborted the sweep half way through. Scoping to the players
 // folder also keeps an isolated test run from silencing the user's real reply.
+// The paths are escaped because -like reads [ and ] as a wildcard set, and a
+// folder name with brackets in it made the sweep match nothing.
 export function sweepPlayers(agent) {
   if (agent !== undefined && !['claude', 'codex'].includes(agent)) throw new Error('unknown agent');
   const script = `
-    $script = '*' + $env:RB_SCRIPT + '*'
-    $players = '*-PlayersDir*' + $env:RB_PLAYERS_DIR + '*'
+    $script = '*' + [Management.Automation.WildcardPattern]::Escape($env:RB_SCRIPT) + '*'
+    $players = '*-PlayersDir*' + [Management.Automation.WildcardPattern]::Escape($env:RB_PLAYERS_DIR) + '*'
     $ids = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
       Where-Object {
         $_.ProcessId -ne $PID -and $_.CommandLine -like '*-File*' -and
