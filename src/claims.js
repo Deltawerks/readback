@@ -5,7 +5,7 @@
 // runtime.json plus a 60 ms settle, which dropped a reply whenever two projects
 // finished within 60 ms of each other, and spoke a reply twice when duplicate
 // hook fires were further apart than that.
-import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readdirSync, statSync, unlinkSync, renameSync } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR } from './config.js';
 
@@ -20,14 +20,31 @@ export function isClaimed(id) {
   return existsSync(path.join(CLAIMS_DIR, safeName(id)));
 }
 
-// True if this process won the claim for this reply.
-export function claim(id) {
+// True if this process won the claim for this reply. With ttlMs, a claim older
+// than that no longer counts: for an id that can recur (one built from the
+// reply's text) it only has to outlast the duplicate fires, not keep the next
+// identical reply quiet.
+export function claim(id, { ttlMs } = {}) {
   if (!existsSync(CLAIMS_DIR)) mkdirSync(CLAIMS_DIR, { recursive: true });
+  const file = path.join(CLAIMS_DIR, safeName(id));
   try {
-    writeFileSync(path.join(CLAIMS_DIR, safeName(id)), String(process.pid), { flag: 'wx' });
+    writeFileSync(file, String(process.pid), { flag: 'wx' });
     return true;
   } catch (err) {
-    if (err.code === 'EEXIST') return false;
+    if (err.code === 'EEXIST') {
+      if (!ttlMs) return false;
+      try {
+        if (Date.now() - statSync(file).mtimeMs <= ttlMs) return false;
+        // Expired: move it aside (only one racer can), then race on a fresh
+        // create, which again has exactly one winner.
+        const old = `${file}.${process.pid}.old`;
+        renameSync(file, old);
+        try { unlinkSync(old); } catch {}
+      } catch {
+        // another racer moved it first
+      }
+      return claim(id);
+    }
     // Any other failure fails open: a bookkeeping error must never silence a
     // reply. At worst a duplicate fire speaks it twice.
     return true;
