@@ -85,14 +85,15 @@ export const LEGACY_STATE_DIRS = [
 ];
 
 // Throwaway data (the log, the queue, the player list and multi-MB WAV chunks)
-// goes in a local (never roamed) dir, so it can't bloat a synced Windows profile.
+// goes in its own cache dir, apart from settings: %USERPROFILE%\.readback\cache
+// on Windows, $XDG_CACHE_HOME/readback or ~/.cache/readback elsewhere.
 //
 // This MUST resolve identically in every Readback process, because the queue and
 // the playback bookkeeping live here and the panel and the hook workers have to
 // find each other's files. It used to fall back to STATE_DIR whenever
 // READBACK_STATE_DIR was set, which looked like a convenience for tests and was a
-// trap in production: the Windows startup script pinned READBACK_STATE_DIR for
-// the panel, Claude Code launches the hook workers without it, and the two halves
+// trap in production: a login script pinned READBACK_STATE_DIR for the panel,
+// Claude Code launches the hook workers without it, and the two halves
 // silently kept their queue, playback epoch and player list in different folders.
 // Settings still agreed, so voice on/off looked fine, while "stop talking" swept
 // a directory that was always empty. Override this location on its own with

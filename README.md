@@ -275,14 +275,16 @@ player controls.
 - Voice off means off. Both the MCP `say` tool and panel previews respect the
   master and selected agent switches. Enable both switches to hear a test.
 
-Keys are stored per-user **outside the repo**: `%USERPROFILE%\.readback\secret.json`
-on Windows (`~/.config/readback/` elsewhere), so cloning into a shared or
-cloud-synced folder can't sync your key with it. Override the location with
-`READBACK_STATE_DIR`.
+Keys are stored per user, in plain text, **outside the repo**:
+`%USERPROFILE%\.readback\secret.json` on Windows (`~/.config/readback/`
+elsewhere), so cloning into a shared or cloud-synced folder can't sync your key
+with it. Override the location with `READBACK_STATE_DIR`. A key set as an
+environment variable takes precedence over the one saved in the panel, and the
+saved one over `.env`.
 
-Working files (the log, the queue, the list of running players, the WAV chunks)
-live separately in `%USERPROFILE%\.readback\cache` (`~/.cache/readback` elsewhere), so
-they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
+Working files (the log, the queue, the list of running players, the WAV chunks,
+the ducking recovery list) live separately in `%USERPROFILE%\.readback\cache`
+(`~/.cache/readback` elsewhere). Override that with `READBACK_CACHE_DIR`.
 
 > **If you override either path, set it for every ReadBack process, not just
 > one.** The panel, the MCP server and each hook worker resolve these
@@ -292,16 +294,20 @@ they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
 > the resolved paths; run it from the panel's environment and from each connected assistant
 > session and compare. The panel also reports both at `/health`.
 
-Replies are cleaned before speaking (code blocks dropped,
-links flattened, markdown/emoji stripped). Extremely long replies are capped
-with a spoken "the rest is on screen", but the cap is deliberately high so it
-acts as a backstop rather than clipping normal replies. Set
-`READBACK_MAX_CHARS` if you want a shorter ceiling on how long a read can run.
+Replies are cleaned before speaking (code blocks dropped, links flattened,
+markdown/emoji stripped). A reply longer than 12,000 characters is cut short
+with a spoken "the rest is on screen"; the cap is a backstop, high enough not to
+clip normal replies. To change it, set `READBACK_MAX_CHARS` to a positive whole
+number. It is applied each time a reply is read, so put it in `.env`, which
+every ReadBack process loads, or in the environment of every process. There is
+no panel control for it, and a blank or invalid value is ignored.
 
-> **Upgrading from an earlier version?** Your key and settings are copied to the
-> new location automatically on first run. The originals are left in the repo's
-> `.readback/` folder (gitignored), so nothing is lost if you roll back. Delete
-> that folder once you've confirmed things still work.
+> **Upgrading from 0.5.1 or earlier?** On first run ReadBack copies your key and
+> settings from the old location (`%APPDATA%\Readback`, or a `.readback` or
+> `.voicebox` folder inside the checkout) to `%USERPROFILE%\.readback`, and
+> starts with voice off. The originals are left where they were, so nothing is
+> lost if you roll back; delete them once you've confirmed things still work.
+> Nothing is copied when `READBACK_STATE_DIR` is set.
 
 ## Ducking (Windows)
 
@@ -338,9 +344,9 @@ With ducking on, ReadBack sets its own playback level on every reply: full, or t
   available with its own voice and tuning controls. Check your provider's current
   plan/pricing before enabling speech across every project. READBACK_MAX_CHARS
   limits the length of each spoken reply (12,000 characters by default).
-- Trouble? Check `readback.log` in `%USERPROFILE%\.readback\cache` on Windows
-  (throwaway data is kept out of the roaming profile), or alongside the state dir
-  otherwise.
+- Trouble? Check `readback.log` in the cache folder
+  (`%USERPROFILE%\.readback\cache` on Windows); `npm run where` prints its exact
+  path.
 
 ## Contributors
 
