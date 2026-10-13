@@ -476,15 +476,20 @@ server.on('clientError', (err, socket) => {
   if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
 });
 
+// A convenience only. A launcher that cannot start fails with an 'error' event,
+// not an exception, and an unheard 'error' event crashed the panel a moment
+// after it began serving; the user can always open the URL by hand.
 function openBrowser(url) {
   try {
-    spawn('cmd', ['/c', 'start', '', url], {
+    const opener = spawn('cmd', ['/c', 'start', '', url], {
       stdio: 'ignore',
       windowsHide: true,
       detached: true,
-    }).unref();
+    });
+    opener.on('error', (err) => log(`panel: could not open a browser (${err.code || err.message}); open ${url} yourself`));
+    opener.unref();
   } catch {
-    // ignore; user can open the URL manually
+    // same as above
   }
 }
 

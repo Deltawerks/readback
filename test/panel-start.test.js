@@ -1,0 +1,60 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import net from 'node:net';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const s = net.createServer();
+    s.on('error', reject);
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address();
+      s.close(() => resolve(port));
+    });
+  });
+}
+
+async function healthy(port) {
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/health`);
+    return r.ok && (await r.json()).readback === true;
+  } catch {
+    return false;
+  }
+}
+
+// Opening the browser is a convenience. When the opener cannot be started (no
+// cmd on PATH, or any system other than Windows) the failure arrives as an
+// error event, and with nothing listening for it the panel crashed a moment
+// after it had started serving.
+test('the panel keeps running when it cannot open a browser', { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-open-'));
+  const port = await freePort();
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'panel-server.js')], {
+    env: {
+      ...env, PATH: '', READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: path.join(dir, 'cache'),
+      READBACK_PORT: String(port), READBACK_DUCKING_HELPER: 'off',
+    },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  try {
+    const deadline = Date.now() + 15000;
+    while (!(await healthy(port)) && Date.now() < deadline && child.exitCode === null) await sleep(150);
+    await sleep(1500);
+    assert.equal(child.exitCode, null, 'the panel exited after failing to open a browser');
+    assert.ok(await healthy(port), 'the panel is still serving');
+  } finally {
+    child.kill();
+    await sleep(300);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
