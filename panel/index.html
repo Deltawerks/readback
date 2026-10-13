@@ -109,6 +109,9 @@
   .toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%) translateY(20px); background: linear-gradient(180deg, rgba(13,21,38,.96), rgba(7,12,24,.98)); border: 1px solid var(--line); color: var(--txt); padding: 10px 16px; border-radius: 8px; font-family: var(--body); font-size: 13px; opacity: 0; pointer-events: none; transition: all .25s ease; box-shadow: 0 10px 30px rgba(0,0,0,.6); max-width: 90vw; z-index: 3; }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .toast.err { border-color: var(--crit); color: #ffd7db; }
+  .card + .card { margin-top: 16px; }
+  .duck-row { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+  .duck-row .keyState { flex: 1; margin: 0; }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 </style>
 </head>
@@ -181,6 +184,44 @@
     <div class="foot">
       <span id="dot" class="dot off"></span>
       <span id="status">connecting…</span>
+    </div>
+  </div>
+
+  <div class="card" id="duckCard">
+    <div class="switch-row">
+      <label class="lbl" style="margin:0">Ducking</label>
+      <button id="duckToggle" class="toggle sm" role="switch" aria-checked="false" aria-label="Ducking"><span class="knob"></span></button>
+    </div>
+    <div class="keyState mb">Turns other audio down while ReadBack speaks or while you dictate, and ReadBack down while you dictate.</div>
+    <div class="switch-row">
+      <span class="lbl2">Lower other audio while ReadBack speaks</span>
+      <button id="duckOnSpeech" class="toggle sm" role="switch" aria-checked="false" aria-label="Lower other audio while ReadBack speaks"><span class="knob"></span></button>
+    </div>
+    <div class="switch-row">
+      <span class="lbl2">Lower other audio while you dictate</span>
+      <button id="duckOnMic" class="toggle sm" role="switch" aria-checked="false" aria-label="Lower other audio while you dictate"><span class="knob"></span></button>
+    </div>
+    <div class="switch-row">
+      <span class="lbl2">Lower ReadBack while you dictate</span>
+      <button id="duckVoiceUnderMic" class="toggle sm" role="switch" aria-checked="false" aria-label="Lower ReadBack while you dictate"><span class="knob"></span></button>
+    </div>
+    <div class="slider">
+      <span class="lbl2">Other audio</span>
+      <input type="range" id="duckDepth" min="0" max="50" step="5" aria-label="Other audio level during a dip" />
+      <output id="duckDepthOut"></output>
+    </div>
+    <div class="slider">
+      <span class="lbl2">ReadBack under mic</span>
+      <input type="range" id="duckVoiceDepth" min="0" max="50" step="5" aria-label="ReadBack level while you dictate" />
+      <output id="duckVoiceDepthOut"></output>
+    </div>
+    <label class="lbl" for="duckMicApps">Dictation apps</label>
+    <div class="mb"><input type="text" id="duckMicApps" placeholder="claude, ChatGPT" spellcheck="false" autocomplete="off" /></div>
+    <label class="lbl" for="duckNever">Never lower</label>
+    <div class="mb"><input type="text" id="duckNever" placeholder="e.g. Discord" spellcheck="false" autocomplete="off" /></div>
+    <div class="duck-row">
+      <span class="keyState" id="duckStatus">checking…</span>
+      <button id="duckRestore" class="btn">Restore volume</button>
     </div>
   </div>
 </div>
@@ -492,7 +533,7 @@ async function loadVoices() {
 // a provider change, never for the poll. Deliberately excludes loadVoices():
 // that one calls the provider API, so it must not run on every refresh.
 function renderLocal() {
-  renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus();
+  renderProviders(); renderModels(); renderTuning(); renderKey(); renderStatus(); renderDucking();
   drawn.provider = prov();
 }
 async function renderAll() {
@@ -507,7 +548,7 @@ async function renderAll() {
 function renderPoll() {
   if (drawn.provider !== prov()) { renderAll(); return; }
   if (drawn.modelId !== cfg().modelId) { renderModels(); renderTuning(); }
-  markActiveProvider(); renderKeyState(); renderStatus();
+  markActiveProvider(); renderKeyState(); renderStatus(); renderDucking();
 }
 
 // The panel used to read state once at load and never again, so anything that
@@ -552,6 +593,74 @@ async function say(text) {
     else toast(r.reason || 'Nothing to speak', true);
   } catch (e) { toast('Speak failed: ' + e.message, true); }
 }
+
+// The ducking card. The poll redraws its switches, readouts and status line,
+// but never a slider being dragged or a text field being typed in.
+const duck = () => state.ducking || {};
+const pct = (v) => Math.round((Number(v) || 0) * 100) + '%';
+const DUCK_SWITCHES = [['duckOnSpeech', 'onSpeech'], ['duckOnMic', 'onMic'], ['duckVoiceUnderMic', 'voiceUnderMic']];
+const DUCK_SLIDERS = [['duckDepth', 'depth', 'duckDepthOut'], ['duckVoiceDepth', 'voiceDepth', 'duckVoiceDepthOut']];
+const DUCK_LISTS = [['duckMicApps', 'micApps'], ['duckNever', 'neverDuck']];
+function duckStatusText() {
+  const d = duck(), st = state.duckingStatus || {};
+  if (!d.enabled) return 'Off';
+  if (st.helper === 'unsupported') return 'Windows only for now';
+  if (st.helper === 'disabled') return 'Audio helper disabled (READBACK_DUCKING_HELPER=off)';
+  if (st.helper === 'failed') return 'Audio helper keeps failing: ' + (st.lastError || 'see readback.log');
+  if (st.helper !== 'ready') return 'Starting the audio helper…';
+  const parts = [];
+  if (st.others === 'down') parts.push('Lowering ' + ((st.apps || []).map((a) => a.name).join(', ') || 'other audio'));
+  if (st.voice === 'low') parts.push('ReadBack at ' + pct(d.voiceDepth));
+  const mics = (st.sources || []).filter((s) => s.startsWith('mic:')).map((s) => s.slice(4));
+  if (mics.length) parts.push('mic: ' + mics.join(', '));
+  return parts.length ? parts.join(' · ') : 'Ready · nothing to lower right now';
+}
+function renderDucking() {
+  const d = duck();
+  $('duckToggle').setAttribute('aria-checked', String(d.enabled === true && !syncError));
+  for (const [id, key] of DUCK_SWITCHES) $(id).setAttribute('aria-checked', String(d[key] === true));
+  for (const [id, key, out] of DUCK_SLIDERS) {
+    if (document.activeElement !== $(id)) $(id).value = Math.round((Number(d[key]) || 0) * 100);
+    $(out).textContent = $(id).value + '%';
+  }
+  for (const [id, key] of DUCK_LISTS) {
+    if (document.activeElement !== $(id)) $(id).value = (d[key] || []).join(', ');
+  }
+  $('duckStatus').textContent = syncError ? 'not connected' : duckStatusText();
+}
+const patchDucking = (body) => patchTop(body, '/api/ducking');
+$('duckToggle').addEventListener('click', async () => {
+  await patchDucking({ enabled: duck().enabled !== true });
+  renderDucking();
+});
+for (const [id, key] of DUCK_SWITCHES) {
+  $(id).addEventListener('click', async () => {
+    await patchDucking({ [key]: duck()[key] !== true });
+    renderDucking();
+  });
+}
+for (const [id, key, out] of DUCK_SLIDERS) {
+  let timer;
+  $(id).addEventListener('input', () => {
+    $(out).textContent = $(id).value + '%';
+    clearTimeout(timer);
+    timer = setTimeout(() => patchDucking({ [key]: Number($(id).value) / 100 }), 250);
+  });
+}
+for (const [id, key] of DUCK_LISTS) {
+  $(id).addEventListener('change', async () => {
+    await patchDucking({ [key]: $(id).value.split(',').map((s) => s.trim()).filter(Boolean) });
+    renderDucking();
+  });
+}
+$('duckRestore').addEventListener('click', async () => {
+  try {
+    const r = await api('/api/ducking/restore', { method: 'POST' });
+    toast(r.restored ? 'Put back ' + r.restored + ' app' + (r.restored === 1 ? '' : 's') : 'Nothing was lowered');
+  } catch (e) {
+    toast('Restore failed: ' + e.message, true);
+  }
+});
 
 $('toggle').addEventListener('click', async () => {
   const want = !state.enabled;
