@@ -71,9 +71,12 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   // never applies it at all. Forgetting at send time lost the app's level in
   // both cases.
   const puttingBack = new Map(); // key -> { name, sid, orig, low, at, seq, resend }
-  // After the restore button: leave everything at full until whatever was
-  // holding it down has stopped, or the button undoes itself on the next tick.
-  let suspended = false;
+  // After the restore button: the voices and mics that were holding everything
+  // down at that moment are ignored until they stop, or the button would undo
+  // itself on the next tick. A new one still counts.
+  let suspended = null; // { pids: Set, mics: Set } or null
+  let lastPids = [];
+  let lastMics = [];
   let version = 1; // starts "changed", so the first tick reports the list
   let reported = 0;
   const touch = () => {
@@ -87,21 +90,31 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     return c;
   }
 
-  // Settle the put-backs a report has caught up with. One whose session went
-  // away first becomes a leftover; after a helper restart each is sent again.
+  // Settle the put-backs a report has caught up with.
   function confirmPutBacks(helper, commands) {
     for (const [key, p] of puttingBack) {
       const o = helper.out.find((x) => x.key === key);
-      if (!p.resend && helper.seq >= p.seq) {
-        puttingBack.delete(key);
-        touch();
-      } else if (!o) {
+      if (!o) {
+        // Gone before a report showed the put-back on it. The helper counts a
+        // command for a vanished session as done, so this is checked before
+        // the count: keep it as a leftover for when the app comes back.
         puttingBack.delete(key);
         pending.push(record(p));
         touch();
       } else if (p.resend) {
-        p.seq = send(commands, { c: 'set', key, vol: p.orig }).seq;
-        p.resend = false;
+        // A replacement helper never got it. Send it again only while the app
+        // is still at a level we left it at; anything else is either back
+        // already or a level the user set while the old helper was hung.
+        if (o.vol >= p.low - RECOVERY_SLACK && o.vol <= p.orig - SEND_STEP) {
+          p.seq = send(commands, { c: 'set', key, vol: p.orig }).seq;
+          p.resend = false;
+        } else {
+          puttingBack.delete(key);
+          touch();
+        }
+      } else if (helper.seq >= p.seq) {
+        puttingBack.delete(key);
+        touch();
       }
     }
   }
@@ -144,7 +157,9 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     if (pending.length !== before) touch();
     if (!pending.length || factor < 1) return; // mid-dip, a reopened app rejoins through takePending
     for (const o of helper.out) {
-      if (!o.name || o.vol < 0) continue;
+      // A session whose own put-back is still on its way keeps it: a leftover
+      // can share its session id (a second process of the same app).
+      if (!o.name || o.vol < 0 || puttingBack.has(o.key)) continue;
       const p = takePending(o);
       if (!p) continue;
       putBack(commands, o.key, p);
@@ -192,7 +207,6 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
         continue;
       }
       if (factor < 1 && o.playing && eligible(o, f)) {
-        const leftover = takePending(o);
         // A put-back no report has shown applied yet: the report can still show
         // the dip, and that must never become the app's original.
         const back = puttingBack.get(o.key);
@@ -200,6 +214,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
           puttingBack.delete(o.key);
           touch();
         }
+        const leftover = back ? null : takePending(o);
         const orig = back ? back.orig : leftover ? leftover.orig : o.vol;
         const entry = { name: o.name, orig, low: r3(orig * s.depth), sent: o.vol, sentSeq: Infinity, user: false, at: now };
         ducked.set(o.key, entry);
@@ -289,9 +304,10 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     players.clear();
     if (helper) {
       // Leftovers the helper can see now, still at a level we left them at
-      // (and never the session just put back above).
+      // (and never a session whose own put-back is on its way, including the
+      // ones just put back above).
       for (const o of helper.out) {
-        if (!o.name || o.vol < 0 || done.has(o.key)) continue;
+        if (!o.name || o.vol < 0 || done.has(o.key) || puttingBack.has(o.key)) continue;
         const p = takePending(o);
         if (!p) continue;
         putBack(commands, o.key, p);
@@ -352,8 +368,10 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     const micUsers = helper ? helper.mic.filter((m) => m.active && f.mic.has(lower(m.name))).map((m) => m.name) : [];
     const speech = f.pids.size > 0;
 
+    lastPids = [...f.pids];
+    lastMics = micUsers.map(lower);
     if (s.enabled !== true) {
-      suspended = false;
+      suspended = null;
       if (helper) confirmPutBacks(helper, commands);
       if (ducked.size || players.size || factor < 1 || voiceFactor < 1) {
         restore(commands, helper);
@@ -366,12 +384,19 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
       return finish(commands, micUsers, speech);
     }
 
-    let othersOn = (s.onSpeech && speech) || (s.onMic && micUsers.length > 0);
-    let voiceOn = s.voiceUnderMic && micUsers.length > 0;
+    let speaking = speech;
+    let dictating = micUsers;
     if (suspended) {
-      if (othersOn || voiceOn) othersOn = voiceOn = false;
-      else suspended = false;
+      const held = suspended;
+      if (![...f.pids].some((pid) => held.pids.has(pid)) && !micUsers.some((m) => held.mics.has(lower(m)))) {
+        suspended = null; // everything Restore silenced has stopped
+      } else {
+        speaking = [...f.pids].some((pid) => !held.pids.has(pid));
+        dictating = micUsers.filter((m) => !held.mics.has(lower(m)));
+      }
     }
+    const othersOn = (s.onSpeech && speaking) || (s.onMic && dictating.length > 0);
+    const voiceOn = s.voiceUnderMic && dictating.length > 0;
     if (othersOn) lastOthers = now;
     if (voiceOn) lastVoice = now;
     const othersTarget = othersOn || now - lastOthers < TIMING.holdMs ? s.depth : 1;
@@ -392,7 +417,7 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   function restoreAll(helper = null) {
     const commands = [];
     const restored = restore(commands, helper);
-    suspended = true;
+    suspended = { pids: new Set(lastPids), mics: new Set(lastMics) };
     const waiting = helper ? 0 : pending.length;
     if (restored) log(`ducking: restore button put back ${restored} app${restored === 1 ? '' : 's'}`);
     if (waiting) log(`ducking: restore button pressed with no audio helper running; ${waiting} app${waiting === 1 ? '' : 's'} kept to put back`);

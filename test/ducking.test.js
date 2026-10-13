@@ -417,6 +417,82 @@ test('an app that moves to another device mid-dip comes back right on both', () 
   assert.deepEqual(h.recovery, []);
 });
 
+// The helper counts a command as applied even when the session it names has
+// just gone. Checking the count first "confirmed" a put-back that never
+// landed, and the app came back quiet with nothing on record.
+test('a put-back that lands after its app has closed stays on record', () => {
+  const h = harness();
+  const first = sessionKey('speakers', 100);
+  h.audio.play(first, 'MusicBee', 0.8, { pid: 100 });
+  h.pids = [7];
+  h.run(400);
+  const out = h.ref.restoreAll(h.audio.state());
+  h.audio.close(first); // gone before the helper gets to the put-back
+  h.audio.apply(out.commands);
+  h.pids = [];
+  h.run(300);
+  assert.deepEqual(h.recovery.map((e) => e.name), ['MusicBee'], 'still on record');
+  const reopened = sessionKey('speakers', 200);
+  h.audio.play(reopened, 'MusicBee', 0.08, { pid: 200 }); // Windows kept the lowered level
+  h.run(200);
+  assert.equal(h.audio.vol(reopened), 0.8);
+});
+
+// A put-back sent again to a replacement helper must not land on a level the
+// user set while the old one was hung.
+test("after a helper restart, a put-back is not sent over the user's own level", () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  h.audio.hang(true);
+  h.pids = [];
+  h.run(GONE); // the fade back never lands
+  h.audio.userSets('mb', 1); // the user turns it up meanwhile
+  h.audio.hang(false);
+  h.audio.restartHelper();
+  h.ref.helperRestarted();
+  h.run(300);
+  assert.equal(h.audio.vol('mb'), 1, "the user's level stands");
+  assert.deepEqual(h.recovery, []);
+});
+
+// Two processes of one app on one device share a session id. A leftover from
+// the one that closed must not be applied to the one whose own put-back is
+// still on its way.
+test('a leftover never overrides a put-back that is still on its way', () => {
+  const h = harness({ lag: true });
+  const a = sessionKey('speakers', 100);
+  const b = sessionKey('speakers', 101);
+  h.audio.play(a, 'MusicBee', 0.8, { pid: 100 });
+  h.audio.play(b, 'MusicBee', 0.6, { pid: 101 });
+  h.pids = [7];
+  h.run(400);
+  h.audio.close(b); // closes mid-dip: a leftover for MusicBee on the speakers
+  h.run(100);
+  h.send(h.ref.restoreAll(h.audio.state()).commands);
+  h.pids = [];
+  h.run(GONE);
+  assert.equal(h.audio.vol(a), 0.8, 'the open one comes back to its own level');
+});
+
+// A dictation app that keeps the mic open (the README's documented case) made
+// one Restore press switch ducking off until the mic closed: a reply that
+// started meanwhile played over the music.
+test('after Restore, a new reply still lowers the music while a mic stays open', () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.audio.mic('claude', true);
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.08);
+  h.audio.apply(h.ref.restoreAll(h.audio.state()).commands);
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.8, 'Restore gives the music back');
+  h.pids = [9];
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.08, 'a new voice still takes the floor');
+});
+
 test('switching off while no helper is connected keeps the leftover and puts it back once one reports', () => {
   const h = harness();
   h.audio.play('mb', 'MusicBee', 0.8);
