@@ -193,7 +193,7 @@ test('a helper that keeps failing the same way is logged once, not on every retr
   let launches = 0;
   const sup = createHelperSupervisor({
     command: process.execPath,
-    args: ['-e', "process.stderr.write('Another ReadBack audio helper is already running in this Windows session.\n'); process.exit(4)"],
+    args: ['-e', "process.stderr.write('Another ReadBack audio helper is already running in this Windows session.'); process.exit(4)"],
     spawnFn: (...a) => {
       launches++;
       return spawn(...a);
