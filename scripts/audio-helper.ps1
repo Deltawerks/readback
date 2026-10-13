@@ -126,6 +126,8 @@ namespace ReadbackAudio
         public bool IsMic;
         public IAudioSessionManager2 Manager;
         public SessionSink Sink;
+        // A listing that failed, to be tried again on the next pass.
+        public bool RelistDue;
     }
 
     // Windows calls this on one of its own threads when a device gets a new
@@ -178,10 +180,12 @@ namespace ReadbackAudio
         // every second while holding everything grew the helper by about 60 MB an
         // hour. Holding sessions of one device while listing another does not
         // leak (measured). So a device is listed when it appears, and after that
-        // new sessions arrive through Windows' notification only; as a backstop
-        // for a missed one, each device is let go of and listed afresh this often,
-        // while nothing is lowered or held below full.
-        const int RETRACK_MS = 60 * 1000;
+        // new sessions arrive through Windows' notification; as a backstop for a
+        // missed one (or a device whose notification could not be registered),
+        // each device's sessions are let go of and the device listed afresh this
+        // often. That is safe mid-dip too: what the helper lowered is remembered
+        // by session key, which the fresh listing gives back unchanged.
+        const int RETRACK_MS = 10 * 1000;
         static readonly Guid IidManager2 = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
         static readonly Guid ClsidEnumerator = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
         // Tags our own changes in Windows' volume-change notifications.
@@ -330,11 +334,16 @@ namespace ReadbackAudio
                         foreach (Endpoint ep in RefreshEndpoints()) ListSessions(ep);
                         devicesAt = now;
                     }
-                    if ((now - retrackAt).TotalMilliseconds >= RETRACK_MS && Idle())
+                    if ((now - retrackAt).TotalMilliseconds >= RETRACK_MS)
                     {
                         DrainCreated();
                         foreach (Endpoint ep in endpoints.Values) Retrack(ep);
                         retrackAt = now;
+                    }
+                    else
+                    {
+                        // A device whose last listing failed holds nothing: try again.
+                        foreach (Endpoint ep in endpoints.Values) if (ep.RelistDue) ListSessions(ep);
                     }
                     bool readOut = applied || (now - outAt).TotalMilliseconds >= 100;
                     if (readOut) outAt = now;
@@ -438,11 +447,13 @@ namespace ReadbackAudio
         }
 
         // Lists one device's sessions. Only ever called while none of that
-        // device's sessions are held (see RETRACK_MS).
+        // device's sessions are held (see RETRACK_MS). A failed listing is
+        // tried again on the next pass rather than leaving the device unseen.
         void ListSessions(Endpoint ep)
         {
             IAudioSessionEnumerator list;
-            if (ep.Manager.GetSessionEnumerator(out list) != 0 || list == null) return;
+            ep.RelistDue = ep.Manager.GetSessionEnumerator(out list) != 0 || list == null;
+            if (ep.RelistDue) return;
             try
             {
                 int count;
@@ -479,15 +490,6 @@ namespace ReadbackAudio
             }
         }
 
-        // Nothing lowered and no player held below full: nothing would be lost
-        // by letting go of a device's sessions for a moment.
-        bool Idle()
-        {
-            if (remembered.Count > 0 || !commands.IsEmpty) return false;
-            foreach (float v in arms.Values) if (v < 0.999f) return false;
-            return true;
-        }
-
         // Let go of one device's sessions, then list that device afresh.
         void Retrack(Endpoint ep)
         {
@@ -504,6 +506,16 @@ namespace ReadbackAudio
             // expired ones too, so the set cannot grow without bound.
             expired.RemoveWhere(k => k.StartsWith(ep.Id, StringComparison.OrdinalIgnoreCase));
             ListSessions(ep);
+            if (ep.RelistDue) return;
+            // A lowered app that closed just as it was let go of is not taken back
+            // (gone, or listed as expired), so Poll never sees it end. Forget its
+            // level here instead, or the list would only ever grow.
+            List<string> ended = new List<string>();
+            foreach (string key in remembered.Keys)
+            {
+                if (key.StartsWith(ep.Id, StringComparison.OrdinalIgnoreCase) && !sessions.ContainsKey(key)) ended.Add(key);
+            }
+            foreach (string key in ended) remembered.Remove(key);
         }
 
         bool Track(Endpoint ep, object so)
@@ -513,6 +525,11 @@ namespace ReadbackAudio
             string key;
             if (control.GetSessionInstanceIdentifier(out key) != 0 || key == null) return false;
             if (sessions.ContainsKey(key) || expired.Contains(key)) return false;
+            int st;
+            int state = control.GetState(out st) == 0 ? st : -1;
+            // Windows can still list a session that has expired. It plays nothing
+            // and is gone a moment later, so it is never taken.
+            if (state == EXPIRED) return false;
             uint pid;
             control.GetProcessId(out pid);
             Session x = new Session();
@@ -524,8 +541,7 @@ namespace ReadbackAudio
             x.IsSystem = control.IsSystemSoundsSession() == 0;
             x.Control = control;
             x.Volume = ep.IsMic ? null : so as ISimpleAudioVolume;
-            int st;
-            x.State = control.GetState(out st) == 0 ? st : -1;
+            x.State = state;
             float vol;
             // A new session of an armed process that the notification missed.
             if (x.Volume != null && arms.TryGetValue(pid, out vol)) x.Volume.SetMasterVolume(vol, ref context);

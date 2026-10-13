@@ -161,6 +161,30 @@ test('the helper lowers a session and puts it back when its stdin closes', { ski
   }
 });
 
+// Every 10 s the helper lets go of each device's sessions and lists them again,
+// a backstop for a new-session event Windows never sent. That runs mid-dip
+// too, so a lowered app has to come through it still lowered, and still be put
+// back when the helper's stdin closes.
+test('a lowered session comes through a relisting and is still put back on EOF', { skip: !WIN, timeout: 120000 }, async () => {
+  const tone = startTone();
+  try {
+    const h = await readyHelper();
+    const s = sessionOf(await h.waitFor((m) => Boolean(sessionOf(m, tone.pid))), tone.pid);
+    const orig = s.vol;
+    h.send({ c: 'set', seq: 1, key: s.key, vol: 0.25, orig });
+    await h.waitFor((m) => m.seq >= 1 && near(sessionOf(m, tone.pid)?.vol ?? -1, 0.25));
+    await new Promise((r) => setTimeout(r, 12000)); // any 12 s holds a relisting
+    const after = sessionOf(await h.waitFor((m) => Boolean(sessionOf(m, tone.pid))), tone.pid);
+    assert.equal(after.key, s.key);
+    assert.ok(near(after.vol, 0.25), 'still lowered after the relisting');
+    h.child.stdin.end();
+    await h.exited;
+    assert.ok(near(await levelOf(tone.pid), orig), 'put back on EOF after the relisting');
+  } finally {
+    tone.kill();
+  }
+});
+
 // The panel server dying is the case the EOF restore exists for, and closing
 // stdin from a live parent does not exercise it: on Windows, Node kills every
 // non-detached child the moment the parent exits.
