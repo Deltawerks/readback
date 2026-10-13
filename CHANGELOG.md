@@ -10,10 +10,11 @@ Adds an optional free voice. Nothing changes for Inworld or ElevenLabs users, an
 
 ### Added
 
-- **Free voice.** A third provider, **Free (Kokoro)**, speaks with Kokoro, an open voice model that runs on your PC: no key, no bill, and the reply text never leaves your machine. `npm run add-free-voice` installs it into `free-voice\`: about 400 MB of packages, pinned by their own lockfile, and a 310 MB model. Then it times a sentence and tells you how fast your PC makes speech.
-- **28 English voices,** American and British, listed best first by the grade Kokoro's authors give each one.
-- **In the panel,** the free voice has no key box and no model picker. The panel says when it is not downloaded yet, and warns when your PC makes speech slower than it plays.
-- **Light on the PC.** It runs the full-precision model on at most four threads, which made speech about 4.5 times faster than it plays on a 24-core desktop; the 8-bit model was three times slower on the CPU. The panel and the MCP server give its memory back after 10 quiet minutes, and a reply that finds the model missing says to reinstall rather than downloading it mid-sentence.
+- **Free voice.** A third provider, **Free (Kokoro)**, speaks with Kokoro, an open voice model that runs on your PC: no key, no bill, and the reply text never leaves your machine. `npm run add-free-voice` installs it into `free-voice\`: about 400 MB of packages, pinned by their own lockfile and installed without running any package's install script, and a 310 MB model, pinned to one revision and checked byte for byte. Then it times a sentence and tells you how fast your PC makes speech.
+- **Safe to run again.** The download goes into a side folder and only replaces the model once every byte checks out, so an interrupted one never leaves a model that looks finished; running the command again repairs a missing or damaged model. When the packages already match, it leaves them alone, and it will not run npm over a free voice that the running panel may be using.
+- **28 English voices,** American and British, listed best first by the grade Kokoro's authors give each one. Long passages full of numbers or paths are split, since Kokoro reads at most 512 sounds at a time and silently drops the rest.
+- **In the panel,** the free voice has no key box and no model picker. The panel says when it is not downloaded yet, and warns when your PC makes speech slower than it plays. The MCP tools will not switch to it before it is installed, and only take its own voices.
+- **Light on the PC.** It runs the full-precision model on at most four threads, which made speech about 4.5 times faster than it plays on a 24-core desktop; the 8-bit model was three times slower on the CPU. The panel and the MCP server give its memory back after 10 quiet minutes, and a reply that finds the model missing or damaged says how to repair it rather than downloading it mid-sentence.
 - **Never sees your keys.** The free voice is never handed an Inworld or ElevenLabs key.
 
 ### Upgrading

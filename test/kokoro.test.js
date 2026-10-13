@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -78,6 +79,113 @@ test('an unknown voice falls back to Heart rather than failing the reply', () =>
   assert.equal(kokoro.voiceFor('bm_george'), 'bm_george');
   assert.equal(kokoro.voiceFor('Luna'), 'af_heart'); // an Inworld voice id
   assert.equal(kokoro.voiceFor(undefined), 'af_heart');
+});
+
+// Where a chunk too long for Kokoro's single pass is cut in two.
+test('a chunk too long for one pass is cut at the clause break nearest its middle', () => {
+  assert.deepEqual(kokoro.splitInHalf('aaaa bbbb cccc, dddd eeee ffff'), ['aaaa bbbb cccc,', 'dddd eeee ffff']);
+  assert.deepEqual(kokoro.splitInHalf('aaaa bbbb cccc dddd'), ['aaaa bbbb', 'cccc dddd']);
+  assert.deepEqual(kokoro.splitInHalf('xxxxxxxxxx'), ['xxxxx', 'xxxxx']);
+  // A clause break near one end is a worse place to cut than a space near the middle.
+  assert.deepEqual(kokoro.splitInHalf('a, bbbbbbbb cccccccc dddddddd eeeeeeee'), ['a, bbbbbbbb cccccccc', 'dddddddd eeeeeeee']);
+});
+
+// A two-file stand-in for the model, so the checker and the downloader are
+// tested without Hugging Face or the real 310 MB file.
+const FAKE = [
+  { path: 'config.json', bytes: Buffer.from('{"a":1}') },
+  { path: 'onnx/model.onnx', bytes: Buffer.alloc(2048, 7) },
+].map((f) => ({ ...f, size: f.bytes.length, sha256: createHash('sha256').update(f.bytes).digest('hex') }));
+const MANIFEST = FAKE.map(({ path: p, size, sha256 }) => ({ path: p, size, sha256 }));
+const modelFile = (dir, file) => path.join(dir, 'onnx-community', 'Kokoro-82M-v1.0-ONNX', file);
+function writeModel(dir, files) {
+  for (const f of files) {
+    mkdirSync(path.dirname(modelFile(dir, f.path)), { recursive: true });
+    writeFileSync(modelFile(dir, f.path), f.bytes);
+  }
+}
+function fakeFetch(replace = {}) {
+  const calls = [];
+  const fetchImpl = async (url) => {
+    calls.push(String(url));
+    const f = FAKE.find((x) => String(url).endsWith(`/${x.path}`));
+    return new Response(replace[f.path] ?? f.bytes, { status: 200 });
+  };
+  return { fetchImpl, calls };
+}
+
+test('the model check tells a missing model from a damaged one', async () => {
+  const dir = path.join(SANDBOX, 'models-check');
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), 'missing');
+  writeModel(dir, FAKE);
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), null);
+  writeFileSync(modelFile(dir, 'onnx/model.onnx'), Buffer.alloc(2048, 8)); // right size, wrong bytes
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), 'damaged');
+  writeFileSync(modelFile(dir, 'onnx/model.onnx'), Buffer.alloc(100, 7)); // cut short
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), 'damaged');
+});
+
+// transformers.js wrote the 310 MB file straight into place and took any file
+// already there for a finished download, so an interrupted one was never
+// repaired. The model was also whatever Hugging Face's main branch held.
+test('the pinned model is moved into place only once every byte checks out', async () => {
+  const dir = path.join(SANDBOX, 'models-download');
+  const { fetchImpl, calls } = fakeFetch();
+  const progress = [];
+  await kokoro.downloadModel({ dir, files: MANIFEST, fetchImpl, onProgress: (done, total) => progress.push([done, total]) });
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), null);
+  assert.equal(existsSync(`${dir}.partial`), false);
+  assert.ok(calls.every((u) => u.includes(`/resolve/${kokoro.MODEL_REVISION}/`)), calls.join(' '));
+  assert.deepEqual(progress.at(-1), [2055, 2055]);
+});
+
+test('a bad download is thrown away, and a damaged model is then replaced', async () => {
+  const dir = path.join(SANDBOX, 'models-bad');
+  writeModel(dir, FAKE);
+  writeFileSync(modelFile(dir, 'onnx/model.onnx'), Buffer.alloc(10)); // a damaged copy in place
+  const bad = fakeFetch({ 'onnx/model.onnx': Buffer.alloc(2048, 9) });
+  await assert.rejects(kokoro.downloadModel({ dir, files: MANIFEST, fetchImpl: bad.fetchImpl }), /did not match/);
+  assert.equal(existsSync(`${dir}.partial`), false);
+  await kokoro.downloadModel({ dir, files: MANIFEST, fetchImpl: fakeFetch().fetchImpl });
+  assert.equal(await kokoro.checkModel({ dir, files: MANIFEST }), null);
+});
+
+// A reinstall skips npm when the packages already match the lockfile: Windows
+// will not let npm replace files that a running panel or MCP server has loaded.
+test('packages count as ready only when they match the lockfile', () => {
+  mkdirFreeVoice();
+  writeFileSync(path.join(FREE_VOICE, 'package-lock.json'), JSON.stringify({ packages: {
+    '': { dependencies: { a: '1.0.0' } },
+    'node_modules/a': { version: '1.0.0' },
+    'node_modules/b': { version: '2.0.0', optional: true, os: ['aix'] }, // another platform's build
+    // Optional with no platform named, but only ever pulled in by another
+    // platform's build, so npm leaves it out here too.
+    'node_modules/c': { version: '3.0.0', optional: true },
+  } }));
+  const pkg = (version) => {
+    mkdirSync(path.join(FREE_VOICE, 'node_modules', 'a'), { recursive: true });
+    writeFileSync(path.join(FREE_VOICE, 'node_modules', 'a', 'package.json'), JSON.stringify({ name: 'a', version }));
+  };
+  assert.equal(kokoro.packagesReady(), false);
+  pkg('1.0.0');
+  assert.equal(kokoro.packagesReady(), true);
+  pkg('0.9.0');
+  assert.equal(kokoro.packagesReady(), false);
+  rmSync(path.join(FREE_VOICE, 'node_modules'), { recursive: true, force: true });
+});
+
+// Runs last: it leaves stand-in package files that the earlier tests must not see.
+test('the free voice counts as installed only with its packages and its model', () => {
+  const touch = (p) => {
+    mkdirSync(path.dirname(p), { recursive: true });
+    writeFileSync(p, '');
+  };
+  touch(path.join(FREE_VOICE, 'node_modules', 'kokoro-js', 'dist', 'kokoro.js'));
+  assert.equal(kokoro.status().installed, false);
+  touch(path.join(FREE_VOICE, 'node_modules', '@huggingface', 'transformers', 'dist', 'transformers.node.mjs'));
+  assert.equal(kokoro.status().installed, false);
+  touch(modelFile(path.join(FREE_VOICE, 'models'), 'onnx/model.onnx'));
+  assert.equal(kokoro.status().installed, true);
 });
 
 function mkdirFreeVoice() {

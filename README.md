@@ -336,21 +336,28 @@ npm run add-free-voice
 ```
 
 That installs its packages into `free-voice\` (about 400 MB, pinned by
-`free-voice\package-lock.json`), downloads the model into `free-voice\models`
-(about 310 MB), then times a sentence and tells you how fast your PC makes
-speech. Then pick **Free (Kokoro)** in the panel. If you use Inworld or
+`free-voice\package-lock.json`, with no package install scripts run), downloads
+the model into `free-voice\models` (about 310 MB, pinned to one revision and
+checked byte for byte), then times a sentence and tells you how fast your PC
+makes speech. Then pick **Free (Kokoro)** in the panel. If you use Inworld or
 ElevenLabs, none of it is ever downloaded or loaded.
 
 - **Speed.** On a 24-core desktop it makes speech about 4.5 times faster than
   it plays, using up to four cores while it talks and none otherwise. On slower
   PCs the first word takes longer. If your PC makes speech slower than it
   plays, the panel says so, because replies will pause.
-- **Memory.** About 550 MB while the model is loaded, up to about 900 MB while
+- **Memory.** About 550 MB while the model is loaded, up to about 1.2 GB while
   it talks. Each reply's worker lets go of it when the reply ends; the panel and
   the MCP server let go after 10 quiet minutes.
 - **English only.** 28 American and British voices, listed best first by the
-  grade Kokoro's authors give each one. Heart is the default.
-- **To remove it,** delete `free-voice\node_modules` and `free-voice\models`.
+  grade Kokoro's authors give each one. Heart is the default. Long passages
+  full of numbers or paths are split, since Kokoro reads at most 512 sounds at
+  a time and would otherwise drop the end.
+- **To repair it,** run `npm run add-free-voice` again. It checks every file
+  and downloads again whatever is missing or damaged.
+- **To remove it,** close the panel and any Claude Code or Codex sessions that
+  have used it (Windows keeps its files in use while they run), then delete
+  `free-voice\node_modules` and `free-voice\models`.
 
 ## Ducking (Windows)
 

@@ -24,4 +24,5 @@ docs/
 # The optional free voice's model and timing, from npm run add-free-voice. Its
 # packages land in free-voice/node_modules/, which node_modules/ above covers.
 free-voice/models/
+free-voice/models.partial/
 free-voice/speed.json
