@@ -411,13 +411,17 @@ may flag them:
 - Speech is provider-agnostic WAV under the hood (Inworld LINEAR16; ElevenLabs
   PCM wrapped in a WAV header), so the streaming player never cares which
   provider you're on.
-- **It costs money per character spoken.** Inworld defaults to TTS-2 Flash
-  (inworld-tts-2-flash), its most cost-efficient current model. TTS-2 flagship
-  (inworld-tts-2) adds Stable, Balanced and Creative delivery modes. Flash exposes
-  speed only; neither sends the obsolete temperature setting. ElevenLabs remains
-  available with its own voice and tuning controls. Check your provider's current
-  plan/pricing before enabling speech across every project. READBACK_MAX_CHARS
-  limits the length of each spoken reply (12,000 characters by default).
+- **It costs money per character spoken.** Both providers bill per character;
+  see [Inworld's pricing](https://inworld.ai/pricing) and
+  [ElevenLabs' API pricing](https://elevenlabs.io/pricing/api) for current
+  rates. Previews, the panel's Speak button and the MCP `say` tool are billed
+  the same way. Inworld defaults to TTS-2 Flash (`inworld-tts-2-flash`), the
+  lower-priced of its two TTS-2 models; TTS-2 flagship (`inworld-tts-2`) adds
+  Stable, Balanced and Creative delivery modes. Flash exposes speed only;
+  neither sends the obsolete temperature setting. ElevenLabs remains available
+  with its own voice and tuning controls. Check your provider's current plan
+  before enabling speech across every project. `READBACK_MAX_CHARS` limits the
+  length of each spoken reply (12,000 characters by default).
 - Trouble? Check `readback.log` in the cache folder
   (`%USERPROFILE%\.readback\cache` on Windows); `npm run where` prints its exact
   path.
