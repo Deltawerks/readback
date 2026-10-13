@@ -23,7 +23,7 @@ import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
 import { speak } from './speak.js';
-import { providerMeta, PROVIDER_IDS, clampKnobs } from './providers/index.js';
+import { providerMeta, PROVIDER_IDS, clampKnobs, getProvider } from './providers/index.js';
 import { log } from './log.js';
 
 const execFileAsync = promisify(execFile);
@@ -375,6 +375,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const provider = body.provider === undefined ? 'inworld' : body.provider;
       if (!PROVIDER_IDS.includes(provider)) return send(res, 400, { ok: false, error: 'unknown provider' });
+      // Key lookups take any other name for Inworld, so a key "for" the free
+      // voice used to answer ok with the saved Inworld key's hint.
+      if (getProvider(provider).needsKey === false) return send(res, 400, { ok: false, error: `${getProvider(provider).label} needs no key` });
       // A missing or non-string key used to wipe the saved one and answer ok.
       // An explicit empty string clears the key; anything else must be a key.
       if (typeof body.apiKey !== 'string') return send(res, 400, { ok: false, error: 'apiKey must be a string' });

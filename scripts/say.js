@@ -10,7 +10,9 @@ const st = readAgentState(process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'c
 const c = activeConfig(st);
 const clean = stripForSpeech(input) || input;
 
-console.log(`Provider: ${st.provider} · voice: ${c.voiceId || '(none)'} · model: ${c.modelId} · speed ${c.speed}`);
+// The free voice has no model to name.
+const model = c.modelId ? ` · model: ${c.modelId}` : '';
+console.log(`Provider: ${st.provider} · voice: ${c.voiceId || '(none)'}${model} · speed ${c.speed}`);
 console.log(`Synthesizing: "${clean}"`);
 
 try {

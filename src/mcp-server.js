@@ -152,6 +152,10 @@ server.registerTool(
   },
   async ({ provider }) => {
     if (!PROVIDER_IDS.includes(provider)) return fail(`unknown provider: ${provider}`);
+    // Switching to the free voice before it is downloaded would make every
+    // reply fail in a background worker, where nobody sees why.
+    const own = getProvider(provider).status;
+    if (own && !own().installed) return fail('The free voice is not installed yet. Run npm run add-free-voice in the ReadBack folder first.');
     writeAgentState(SOURCE, { provider });
     return text(`provider → ${readState().provider}`);
   }
@@ -166,6 +170,10 @@ server.registerTool(
   },
   async ({ voiceId }) => {
     const st = readState();
+    // The free voice has a fixed list. Saving another provider's voice id
+    // reported it as set while the default voice spoke.
+    const p = getProvider(st.provider);
+    if (p.voiceFor && p.voiceFor(voiceId) !== voiceId) return fail(`${voiceId} is not one of ${p.label}'s voices. See list_voices.`);
     updateProviderConfig(st.provider, { voiceId });
     return text(`voice → ${activeConfig(readState()).voiceId} (${st.provider})`);
   }
@@ -180,6 +188,8 @@ server.registerTool(
   },
   async ({ modelId }) => {
     const st = readState();
+    const p = getProvider(st.provider);
+    if (!p.models.length) return fail(`${p.label} has no models to choose from.`);
     updateProviderConfig(st.provider, { modelId });
     return text(`model → ${activeConfig(readState()).modelId} (${st.provider})`);
   }
@@ -190,7 +200,7 @@ server.registerTool(
   {
     title: 'Set speed',
     description: 'Set the speaking rate for the active provider (each provider clamps to its own range).',
-    inputSchema: { speed: z.number().min(0.5).max(1.5).describe('Speaking rate multiplier') },
+    inputSchema: { speed: z.number().min(0.5).max(2).describe('Speaking rate multiplier') },
   },
   async ({ speed }) => {
     const st = readState();
