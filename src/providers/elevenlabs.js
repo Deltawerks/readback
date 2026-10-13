@@ -14,7 +14,7 @@ function elError(kind, status, detail) {
 }
 
 const TTS_BASE = 'https://api.elevenlabs.io/v1/text-to-speech';
-const VOICES_URL = 'https://api.elevenlabs.io/v1/voices'; // account voices (matches AgentLink)
+const VOICES_URL = 'https://api.elevenlabs.io/v1/voices'; // the voices on the account
 const OUTPUT_FORMAT = 'pcm_24000'; // raw PCM → wrapped to WAV for the headless player
 
 // Keep a number inside the range the API accepts, and fall back to the default
