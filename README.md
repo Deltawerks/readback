@@ -279,6 +279,19 @@ acts as a backstop rather than clipping normal replies. Set
 > `.readback/` folder (gitignored), so nothing is lost if you roll back. Delete
 > that folder once you've confirmed things still work.
 
+## Ducking (Windows)
+
+Switch on **Ducking** in the panel and ReadBack gets out of your way:
+
+- **While ReadBack speaks**, everything else that's playing (music, videos, games) dips to 10% of its level and comes back when the voice is done.
+- **While you dictate** into Claude Desktop or Codex Desktop, the same dip happens. If ReadBack starts talking while your mic is open, it whispers at 15% instead of blasting into your voice-to-text.
+
+It works with any player and needs no setup. ReadBack watches which apps have your microphone open. Windows reports this per app: `claude` is Claude Desktop and `ChatGPT` is Codex Desktop. It lowers other apps through Windows' own per-app volume, the same levels as the Volume Mixer. Move an app's volume yourself during a dip and ReadBack leaves it alone.
+
+Ducking runs inside the panel server, so keep the panel running (see "Day to day" for starting it at sign-in). If the panel server or the small audio helper it starts ever dies mid-dip, the volume goes back on its own: the helper restores it, or failing that, the next panel start does. The panel's **Restore volume** button does it on demand.
+
+The settings cover the dip depth for other audio and for ReadBack, which apps count as dictation, and a "never lower" list (for a call app, say). Ducking is off on a fresh install. Windows only for now.
+
 ## Notes & limits
 
 - Windows only (PowerShell `SoundPlayer` playback). No STT / voice input.
@@ -308,7 +321,7 @@ acts as a backstop rather than clipping normal replies. Set
 ReadBack is a DeltaWerks project built with contributions from multiple AI coding assistants:
 
 - **DeltaWerks** - project creator, product direction, design, and real-world testing.
-- **Claude (Anthropic)** - the original Claude integration and earlier speech, queue, and settings-reliability work.
+- **Claude (Anthropic)** - the original Claude integration, earlier speech, queue, and settings-reliability work, and voice-aware ducking in 0.7.
 - **Codex (OpenAI)** - Codex integration, independent Claude/Codex profiles, Inworld TTS-2 controls, Windows playback-lifetime fixes, regression tests, and documentation for the 0.6 release.
 
 ## License

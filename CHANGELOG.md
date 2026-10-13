@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.7.0
+
+### Added
+
+- **Ducking.** While ReadBack speaks, or while you dictate into Claude Desktop or Codex Desktop, other audio dips to 10% and comes back afterwards. While you dictate, ReadBack's own voice drops to 15% so it can't blast into your voice-to-text. Any player works, with nothing to configure. Off by default; switch it on in the panel.
+- A single referee in the panel server owns every volume change, so overlapping speech, previews and dictation can never bring the music back early. A small Windows PowerShell audio helper (inline C#, no new dependencies) does the Windows audio work and restores everything on exit, including when the panel server dies.
+- Crash safety:
+  - apps left lowered by a power cut are put back on the next panel start
+  - an app closed mid-dip is put back when it reopens
+  - a **Restore volume** button restores on demand
+  - moving an app's volume yourself during a dip is respected
+- Tests:
+  - the referee's overlap, hold, restore, manual-change and recovery rules
+  - settings normalization under the settings lock
+  - the panel routes
+  - a Windows integration test that ducks a throwaway silent app and checks it comes back
+
 ## 0.6.3
 
 - Fix silent Codex replies in long-running chats whose transcripts exceed 128 MB. Verify session identity at the beginning and search backward for the matching turn, with bounded memory and no total-file-size cutoff.
