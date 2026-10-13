@@ -109,7 +109,7 @@ test('the restore route answers with how many apps it put back', async () => {
   try {
     const r = await p.post('/api/ducking/restore', {});
     assert.equal(r.status, 200);
-    assert.deepEqual(await r.json(), { restored: 0 });
+    assert.deepEqual(await r.json(), { restored: 0, waiting: 0 });
   } finally {
     p.stop();
   }

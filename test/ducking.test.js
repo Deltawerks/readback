@@ -286,6 +286,36 @@ test('the restore button puts everything back and reports how many', () => {
   assert.equal(h.audio.vol('mb'), 0.8);
 });
 
+// A put-back that cannot reach a helper must not be forgotten, or the app it
+// was for stays quiet with no record left anywhere.
+test('with no helper connected, the restore button keeps what it could not put back and says so', () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  h.pids = [];
+  const out = h.ref.restoreAll(null);
+  assert.equal(out.restored, 0);
+  assert.equal(out.waiting, 1);
+  assert.deepEqual(out.recovery.map((e) => e.name), ['MusicBee']);
+  h.step(); // a helper is reporting again
+  assert.equal(h.audio.vol('mb'), 0.8);
+});
+
+test('switching off while no helper is connected keeps the leftover and puts it back once one reports', () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.pids = [7];
+  h.run(400);
+  h.settings = { ...h.settings, enabled: false };
+  const out = h.ref.tick({ now: h.now, settings: h.settings, readbackPids: [], helper: null });
+  h.now += TIMING.tickMs;
+  assert.deepEqual(out.commands, [], 'nothing is sent into the void');
+  assert.deepEqual(out.recovery.map((e) => e.name), ['MusicBee'], 'still on record');
+  h.step(); // ducking is still off, but a helper is reporting again
+  assert.equal(h.audio.vol('mb'), 0.8);
+});
+
 // Review focus 1.
 test('dragging the depth slider mid-dip glides other audio to the new level', () => {
   const h = harness();

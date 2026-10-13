@@ -7,6 +7,13 @@ import { createReferee, TIMING, RECOVERY_MAX_AGE_MS } from './ducking.js';
 import { createHelperSupervisor } from './ducking-helper.js';
 import { log as defaultLog } from './log.js';
 
+// With ducking off, the helper still runs this long after the panel starts, a
+// switch-off, or a restore press whenever leftovers remain, so apps a crash or
+// an unheard put-back left lowered still go back.
+const CLEANUP_MS = 30 * 1000;
+// The helper reports at least every 2 s; this much silence means it is hung.
+const STALE_MS = 6 * 1000;
+
 // Apps we lowered and their original levels, kept in the cache dir (never with
 // settings), so a power cut mid-dip can be undone on the next panel start.
 export function loadRecovery(file = DUCKING_FILE, now = Date.now()) {
@@ -55,7 +62,8 @@ export function createDuckingDriver({
   log = defaultLog,
   clock = () => Date.now(),
 } = {}) {
-  const referee = createReferee({ recovery: loadRecovery(recoveryFile, clock()), log });
+  const leftovers = loadRecovery(recoveryFile, clock());
+  const referee = createReferee({ recovery: leftovers, log });
   const status = { helper: 'off', others: 'idle', voice: 'full', sources: [], apps: [], lastError: null };
   let settings = null;
   let settingsAt = -Infinity;
@@ -63,6 +71,11 @@ export function createDuckingDriver({
   let playersAt = -Infinity;
   let helperState = null;
   let timer = null;
+  let recoveryCount = leftovers.length;
+  let cleanupUntil = clock() + CLEANUP_MS;
+  let lastReportAt = -Infinity;
+  let wasOn = false;
+  const cleaning = (now) => recoveryCount > 0 && now < cleanupUntil;
 
   let supervisor = null;
   if (platform !== 'win32') status.helper = 'unsupported';
@@ -71,9 +84,11 @@ export function createDuckingDriver({
     supervisor = makeSupervisor({
       onMessage: (m) => {
         if (m.t === 'ready') {
+          lastReportAt = clock();
           helperState = null;
           referee.helperRestarted();
         } else if (m.t === 'state') {
+          lastReportAt = clock();
           helperState = {
             seq: Number(m.seq) || 0,
             mic: Array.isArray(m.mic) ? m.mic : [],
@@ -94,7 +109,10 @@ export function createDuckingDriver({
 
   function apply(out) {
     for (const c of out.commands) supervisor?.send(c);
-    if (out.recovery) saveRecovery(out.recovery, recoveryFile, log);
+    if (out.recovery) {
+      saveRecovery(out.recovery, recoveryFile, log);
+      recoveryCount = out.recovery.length;
+    }
     Object.assign(status, out.status);
   }
 
@@ -118,11 +136,18 @@ export function createDuckingDriver({
       }
     }
     const on = settings?.enabled === true;
-    if (on) supervisor?.start();
+    if (wasOn && !on) cleanupUntil = now + CLEANUP_MS; // switched off: let the put-backs land
+    wasOn = on;
+    if (on || cleaning(now)) supervisor?.start();
+    if (supervisor && status.helper === 'ready' && now - lastReportAt > STALE_MS) {
+      log('ducking: the audio helper stopped reporting; restarting it');
+      lastReportAt = now;
+      supervisor.restart();
+    }
     apply(referee.tick({ now, settings, readbackPids: pids, helper: helperState }));
-    // Off: the put-backs above are already queued on the helper's stdin, ahead
-    // of the EOF that stop() sends.
-    if (!on) supervisor?.stop();
+    // Off with nothing left to clean up: the put-backs above are already queued
+    // on the helper's stdin, ahead of the EOF that stop() sends.
+    if (!on && !cleaning(now)) supervisor?.stop();
   }
 
   return {
@@ -147,7 +172,9 @@ export function createDuckingDriver({
     restoreNow() {
       const out = referee.restoreAll(helperState);
       apply(out);
-      return out.restored;
+      // Whatever could not be put back yet gets a cleanup run, ducking on or off.
+      cleanupUntil = clock() + CLEANUP_MS;
+      return { restored: out.restored, waiting: out.waiting };
     },
     status: () => ({ ...status }),
   };

@@ -129,6 +129,16 @@ export function createHelperSupervisor({
         setStatus('off');
       }
     },
+    // A helper that stopped reporting: end it hard. Its relay takes it down
+    // too, and the exit handler restarts it like any other death.
+    restart() {
+      if (!child) return;
+      try {
+        child.kill();
+      } catch {
+        // already gone
+      }
+    },
     send(msg) {
       if (!child || !child.stdin || child.stdin.destroyed) return false;
       try {

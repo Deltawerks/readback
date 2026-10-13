@@ -25,16 +25,17 @@ const MB = { key: 'mb', pid: 50, name: 'MusicBee', vol: 0.8, playing: true, syst
 
 // A driver wired to a fake supervisor that records what it is asked to do,
 // in order, in r.events.
-function rig({ platform = 'win32', helperMode } = {}) {
+function rig({ platform = 'win32', helperMode, settings = ON, recovery } = {}) {
   const fake = { cb: null, running: false };
   const r = {
-    settings: ON,
+    settings,
     players: [],
     now: 1_000_000,
     events: [],
     logs: [],
     file: path.join(mkdtempSync(path.join(DIR, 'rig-')), 'ducking.json'),
   };
+  if (recovery) writeFileSync(r.file, JSON.stringify({ v: 1, entries: recovery }));
   r.driver = createDuckingDriver({
     readSettings: () => {
       if (r.settings instanceof Error) throw r.settings;
@@ -59,6 +60,9 @@ function rig({ platform = 'win32', helperMode } = {}) {
         send(c) {
           r.events.push(c);
           return true;
+        },
+        restart() {
+          r.events.push('restart');
         },
         running: () => fake.running,
         status: () => (fake.running ? 'ready' : 'off'),
@@ -164,6 +168,31 @@ test('the restore button reports how many apps it put back', () => {
   r.report([MB]);
   r.players = [7];
   r.run(400);
-  assert.equal(r.driver.restoreNow(), 1);
+  assert.deepEqual(r.driver.restoreNow(), { restored: 1, waiting: 0 });
   assert.ok(r.sets().some((c) => c.key === 'mb' && c.vol === 0.8));
+});
+
+// A crash or power cut can leave an app lowered while ducking is now off. The
+// leftover has to be put back anyway, so a short cleanup run starts the
+// helper, and stops it again once nothing is left to do.
+test('with ducking off, a leftover from a crash is still put back by a short cleanup run', () => {
+  const r = rig({
+    settings: { ...ON, enabled: false },
+    recovery: [{ name: 'MusicBee', orig: 0.8, low: 0.08, at: 1_000_000 - 1000 }],
+  });
+  r.driver.tick();
+  assert.deepEqual(r.events, ['start'], 'the cleanup run starts the helper');
+  r.report([{ ...MB, vol: 0.08 }]);
+  r.driver.tick();
+  assert.ok(r.sets().some((c) => c.key === 'mb' && c.vol === 0.8));
+  assert.equal(r.events.at(-1), 'stop', 'and stops it once nothing is left');
+});
+
+test('a helper that stops reporting is restarted', () => {
+  const r = rig();
+  r.driver.tick();
+  r.report([MB]);
+  r.run(7000);
+  assert.ok(r.events.includes('restart'));
+  assert.ok(r.logs.some((l) => /stopped reporting/.test(l)));
 });

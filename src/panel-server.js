@@ -455,7 +455,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/ducking/restore' && req.method === 'POST') {
-      return send(res, 200, { restored: ducking.restoreNow() });
+      return send(res, 200, ducking.restoreNow());
     }
 
     return send(res, 404, { error: 'not found' });

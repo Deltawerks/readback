@@ -656,7 +656,9 @@ for (const [id, key] of DUCK_LISTS) {
 $('duckRestore').addEventListener('click', async () => {
   try {
     const r = await api('/api/ducking/restore', { method: 'POST' });
-    toast(r.restored ? 'Put back ' + r.restored + ' app' + (r.restored === 1 ? '' : 's') : 'Nothing was lowered');
+    const apps = (n) => n + ' app' + (n === 1 ? '' : 's');
+    if (r.waiting) toast('The audio helper is not running yet; ' + apps(r.waiting) + ' will be put back when it is');
+    else toast(r.restored ? 'Put back ' + apps(r.restored) : 'Nothing was lowered');
   } catch (e) {
     toast('Restore failed: ' + e.message, true);
   }

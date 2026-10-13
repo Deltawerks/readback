@@ -94,6 +94,27 @@ test('a helper that dies is restarted', async () => {
   await until(() => statuses.at(-1) === 'off');
 });
 
+test('restart ends a helper that stopped answering and starts a fresh one', async () => {
+  let ready = 0;
+  const sup = createHelperSupervisor({
+    command: process.execPath,
+    args: [FAKE],
+    onMessage: (m) => {
+      if (m.t === 'ready') ready++;
+    },
+    setTimer: (fn) => setTimeout(fn, 20),
+  });
+  sup.start();
+  try {
+    await until(() => ready === 1);
+    sup.restart();
+    await until(() => ready === 2);
+  } finally {
+    sup.stop(); // a failure above must not leave a fake helper holding the run open
+  }
+  await until(() => sup.status() === 'off');
+});
+
 test('stop cancels a pending restart', async () => {
   let spawned = 0;
   const sup = createHelperSupervisor({

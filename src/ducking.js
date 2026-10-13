@@ -204,17 +204,25 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     touch();
   }
 
-  // Everything back now, no fade: switching off, and the restore button.
+  // Everything back now, no fade: switching off, and the restore button. With
+  // no helper listening nothing can be put back yet, so every lowered app
+  // becomes a leftover instead of being forgotten, and the next helper to
+  // report puts it back.
   function restore(commands, helper) {
     let count = 0;
     for (const [key, e] of ducked) {
       if (e.user) continue;
+      if (!helper) {
+        pending.push({ name: e.name, orig: e.orig, low: e.low, at: e.at });
+        continue;
+      }
       send(commands, { c: 'set', key, vol: e.orig });
       send(commands, { c: 'forget', key });
       count++;
     }
     ducked.clear();
     for (const [pid, p] of players) {
+      if (!helper) continue;
       if (!p.user && p.sent !== 1) send(commands, { c: 'arm', pid, vol: 1 });
       send(commands, { c: 'arm', pid, vol: null });
     }
@@ -287,7 +295,11 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
     if (s.enabled !== true) {
       if (ducked.size || players.size || factor < 1 || voiceFactor < 1) {
         restore(commands, helper);
-        log('ducking: switched off; everything put back');
+        log(helper ? 'ducking: switched off; everything put back' : 'ducking: switched off with no audio helper running; lowered apps kept to put back later');
+      } else if (helper && pending.length) {
+        // Off, but leftovers remain (a crash, or a switch-off nobody heard):
+        // put back whatever a helper can see.
+        resolvePending(helper, commands, now);
       }
       return finish(commands, micUsers, speech);
     }
@@ -313,8 +325,10 @@ export function createReferee({ recovery = [], log = () => {} } = {}) {
   function restoreAll(helper = null) {
     const commands = [];
     const restored = restore(commands, helper);
+    const waiting = helper ? 0 : pending.length;
     if (restored) log(`ducking: restore button put back ${restored} app${restored === 1 ? '' : 's'}`);
-    return { ...finish(commands, [], false), restored };
+    if (waiting) log(`ducking: restore button pressed with no audio helper running; ${waiting} app${waiting === 1 ? '' : 's'} kept to put back`);
+    return { ...finish(commands, [], false), restored, waiting };
   }
 
   // A restarted helper remembers nothing: re-send every level, with its
