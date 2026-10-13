@@ -292,6 +292,8 @@ Ducking runs inside the panel server, so keep the panel running (see "Day to day
 
 The settings cover the dip depth for other audio and for ReadBack, which apps count as dictation, and a "never lower" list (for a call app, say). Ducking is off on a fresh install. Windows only for now.
 
+With ducking on, ReadBack sets its own playback level on every reply: full, or the whisper level while you dictate. A lower level you give "Windows PowerShell" in the Volume Mixer (which is ReadBack's voice) won't stick while ducking is on, so set ReadBack's loudness with your system volume instead.
+
 ## Notes & limits
 
 - Windows only (PowerShell `SoundPlayer` playback). No STT / voice input.
