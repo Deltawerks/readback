@@ -93,3 +93,54 @@ test('the panel keeps running when it cannot open a browser', { timeout: 30000 }
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A player that cannot start (a script policy blocking PowerShell) still got
+// "Speaking..." from the panel, while nothing was heard.
+test("the panel's Speak says so when the audio player could not start", { timeout: 30000 }, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-player-dead-'));
+  writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ enabled: true, provider: 'inworld' }));
+  const fixture = path.join(dir, 'fixture.cjs');
+  writeFileSync(fixture, `
+    const cp = require('node:child_process');
+    const { syncBuiltinESMExports } = require('node:module');
+    const realSpawn = cp.spawn;
+    cp.spawn = function (command, args, options) {
+      if (command === 'powershell' && args.includes('-Dir')) return realSpawn(process.execPath, ['-e', 'process.exit(3)'], { stdio: 'ignore', windowsHide: true });
+      return realSpawn(command, args, options);
+    };
+    cp.execFileSync = () => Buffer.alloc(0);
+    syncBuiltinESMExports();
+    globalThis.fetch = async () => {
+      await new Promise((r) => setTimeout(r, 600));
+      const b = Buffer.alloc(44 + 3200); b.write('RIFF', 0); b.write('WAVE', 8); b.write('fmt ', 12); b.writeUInt32LE(16, 16);
+      b.writeUInt32LE(32000, 28); b.write('data', 36); b.writeUInt32LE(3200, 40);
+      return new Response(JSON.stringify({ audioContent: b.toString('base64') }));
+    };
+  `);
+  const port = await freePort();
+  const child = spawn(process.execPath, [path.join(ROOT, 'src', 'panel-server.js'), '--no-open'], {
+    env: {
+      ...process.env, READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: path.join(dir, 'cache'), READBACK_PORT: String(port),
+      READBACK_DUCKING_HELPER: 'off', INWORLD_API_KEY: 'isolated-fixture-key', NODE_OPTIONS: `--require ${JSON.stringify(fixture)}`,
+    },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  try {
+    const deadline = Date.now() + 15000;
+    while (!(await healthy(port)) && Date.now() < deadline) await sleep(150);
+    const base = `http://127.0.0.1:${port}`;
+    const r = await fetch(`${base}/api/say`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: base, 'Sec-Fetch-Site': 'same-origin' },
+      body: JSON.stringify({ text: 'Hello there.', agent: 'claude' }),
+    });
+    const body = await r.json();
+    assert.equal(body.ok, false);
+    assert.match(body.reason, /player/i);
+  } finally {
+    child.kill();
+    await sleep(300);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

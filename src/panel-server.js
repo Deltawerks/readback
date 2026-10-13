@@ -417,6 +417,10 @@ const server = http.createServer(async (req, res) => {
       // wait:false awaits the first chunk (so errors surface here), then
       // streams the rest in the background.
       const result = await speak(clean, st, { wait: false });
+      if (result.playerFailed !== undefined) {
+        log(`panel: the audio player quit before it played anything (${result.playerFailed})`);
+        return send(res, 200, { ok: false, reason: `The audio player quit before it played anything (${result.playerFailed})` });
+      }
       return send(res, 200, { ok: !result.aborted, reason: result.aborted ? 'Speech was muted or stopped' : undefined });
     }
 

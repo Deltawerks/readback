@@ -133,6 +133,7 @@ server.registerTool(
       if (!clean || clean.length < 2) return text('(nothing speakable in that text)');
       const result = await speak(clean, st, { wait: false });
       if (result.aborted) return text('Speech was muted or stopped.');
+      if (result.playerFailed !== undefined) return fail(`the audio player quit before it played anything (${result.playerFailed})`);
       return text(`🗣 speaking (${activeConfig(st).voiceId || st.provider})`);
     } catch (err) {
       log('say error', err.message);
