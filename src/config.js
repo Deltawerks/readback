@@ -9,12 +9,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Project root = parent of src/
 export const ROOT = path.resolve(__dirname, '..');
 
+const ENV_KEY_NAME = { inworld: 'INWORLD_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY' };
+
 // Capture genuine environment API keys BEFORE loading .env, so a real env var
 // wins, but a panel-saved key beats a stale .env entry.
 const REAL_ENV_KEYS = {
   inworld: process.env.INWORLD_API_KEY,
   elevenlabs: process.env.ELEVENLABS_API_KEY,
 };
+
+// API keys found in .env. Kept out of process.env on purpose: every worker the
+// hooks start inherits process.env, and a key put there came back looking like
+// a real environment variable, outranking the key saved in the panel.
+const DOTENV_KEYS = {};
 
 // Minimal .env loader (no dependency). Does not override real environment vars.
 function loadDotEnv() {
@@ -38,7 +45,8 @@ function loadDotEnv() {
     ) {
       val = val.slice(1, -1);
     }
-    if (process.env[key] === undefined) process.env[key] = val;
+    if (Object.values(ENV_KEY_NAME).includes(key)) DOTENV_KEYS[key] = val;
+    else if (process.env[key] === undefined) process.env[key] = val;
   }
 }
 loadDotEnv();
@@ -143,7 +151,6 @@ export const REMOTE_ORIGINS = new Set(
 );
 
 // --- API keys (per provider) ---
-const ENV_KEY_NAME = { inworld: 'INWORLD_API_KEY', elevenlabs: 'ELEVENLABS_API_KEY' };
 const SECRET_FIELD = { inworld: 'inworldApiKey', elevenlabs: 'elevenlabsApiKey' };
 
 // Unknown provider strings fall back to inworld (mirrors getProvider) so key
@@ -167,7 +174,7 @@ export function getApiKey(provider = 'inworld') {
   if (real && real.trim()) return real.trim();
   const fromFile = (readSecret()[SECRET_FIELD[provider]] || '').trim();
   if (fromFile) return fromFile;
-  return (process.env[ENV_KEY_NAME[provider]] || '').trim();
+  return (DOTENV_KEYS[ENV_KEY_NAME[provider]] || '').trim();
 }
 
 // Persist a provider's key from the panel (merges, doesn't clobber the other).
