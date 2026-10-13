@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
+import { asciiJson } from './ascii-json.js';
 
 // CREATE_NEW_PROCESS_GROUP (Node's detached:true) does not escape a Windows
 // job object. WMI creates the worker outside the hook's job, so Codex can reap
-// the hook tree without cutting off audio. Environment is piped, never argv.
+// the hook tree without cutting off audio. Environment is piped, never argv,
+// and ASCII-escaped, because PowerShell would mangle an accented path.
 export async function launchIndependentNode(script, args = [], env = process.env) {
   const quote = (value) => {
     if (/["\r\n]/.test(value)) throw new Error('invalid worker path');
@@ -38,7 +40,7 @@ export async function launchIndependentNode(script, args = [], env = process.env
       if (code !== 0 || !Number.isSafeInteger(pid) || pid <= 0) reject(new Error('worker launch failed'));
       else resolve(pid);
     });
-    child.stdin.end(JSON.stringify({ commandLine,
+    child.stdin.end(asciiJson({ commandLine,
       environment: Object.entries(env).filter(([, v]) => v !== undefined).map(([k, v]) => `${k}=${v}`),
     }));
   });

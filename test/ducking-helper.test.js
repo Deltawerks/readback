@@ -11,7 +11,8 @@ process.env.READBACK_CACHE_DIR = DIR;
 const LOG = path.join(DIR, 'fake.log');
 process.env.FAKE_LOG = LOG;
 
-const { createHelperSupervisor, asciiJson } = await import('../src/ducking-helper.js');
+const { createHelperSupervisor } = await import('../src/ducking-helper.js');
+const { asciiJson } = await import('../src/ascii-json.js');
 
 // A stand-in helper that speaks the protocol: noise and a broken line first,
 // then ready; it logs every command it receives, dies on "crash", and records

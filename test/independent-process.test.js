@@ -98,3 +98,25 @@ public static class ReadBackTestJob {
   assert.equal(readFileSync(path.join(dir, 'independent.done'), 'utf8'), 'environment preserved');
   assert.equal(existsSync(path.join(dir, 'control.done')), false, 'ordinary detached child must die with its job');
 });
+
+// Windows PowerShell decodes piped stdin with the console code page, not UTF-8.
+// A launch request carrying "é" arrived garbled, so a profile folder such as
+// C:\Users\José sent the worker to a path that does not exist and Codex replies
+// were never spoken.
+test('independent worker gets non-ASCII paths, arguments and environment intact', {
+  skip: process.platform !== 'win32', timeout: 20000,
+}, async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-José-ünï-'));
+  const worker = path.join(dir, 'wörker.cjs');
+  writeFileSync(worker, `
+    require('node:fs').writeFileSync(require('node:path').join(__dirname, 'received.json'),
+      JSON.stringify({ arg: process.argv[2], env: process.env.RB_UNICODE_FIXTURE }));
+  `);
+  const { launchIndependentNode } = await import('../src/independent-process.js');
+  await launchIndependentNode(worker, ['Señor ✓'], { ...process.env, RB_UNICODE_FIXTURE: 'Zoë ✓ 日本' });
+  const received = path.join(dir, 'received.json');
+  const deadline = Date.now() + 10000;
+  while (!existsSync(received) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(existsSync(received), 'the worker never ran: its path was garbled on the way');
+  assert.deepEqual(JSON.parse(readFileSync(received, 'utf8')), { arg: 'Señor ✓', env: 'Zoë ✓ 日本' });
+});

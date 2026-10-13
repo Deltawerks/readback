@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import path from 'node:path';
 import { ROOT } from './config.js';
+import { asciiJson } from './ascii-json.js';
 
 export const HELPER_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper.ps1');
 // Started detached, so it lives outside the panel server's job object and the
@@ -10,14 +11,6 @@ export const HELPER_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper.ps1');
 export const RELAY_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper-relay.js');
 const HELPER_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', HELPER_SCRIPT];
 const BACKOFF_MS = [1000, 2000, 5000, 15000, 30000];
-
-// Windows PowerShell reads stdin in the console code page, so anything outside
-// ASCII (a session id whose path holds an accented user name) would arrive
-// mangled and never match. Escape it: JSON parsers turn \uXXXX back into the
-// same string.
-export function asciiJson(value) {
-  return JSON.stringify(value).replace(/[\u007f-￿]/g, (ch) => `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`);
-}
 
 // Keeps the platform audio helper running while ducking is on: parses its JSON
 // lines (anything else on its stdout is ignored), restarts it with backoff
