@@ -32,9 +32,11 @@ desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
 > Inworld, or ElevenLabs.
 
 **Upgrading from 0.5.x?** 0.7.0 adds Codex support, separate Claude and Codex
-voice profiles, Inworld TTS-2 and optional music ducking. Your voices, speeds,
-keys and master switch carry over; a saved Inworld TTS-1 or TTS-1.5 model moves
-to TTS-2 Flash. See the [changelog](CHANGELOG.md). After `git pull`, run
+voice profiles, Inworld TTS-2 and optional music ducking. Your voices, speeds
+and keys carry over, and so does the master switch from 0.5.2 (coming from
+0.5.0 or 0.5.1, your settings move to a new folder and voice starts off; see the
+upgrade note under "Using it"). A saved Inworld TTS-1 or TTS-1.5 model moves to
+TTS-2 Flash. See the [changelog](CHANGELOG.md). After `git pull`, run
 `npm install`, then restart the panel and any open Claude or Codex sessions so
 their ReadBack MCP server reloads.
 
