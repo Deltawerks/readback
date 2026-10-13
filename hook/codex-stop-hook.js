@@ -2,7 +2,7 @@
 // Fast, non-blocking bridge. A detached worker owns the complete playback;
 // neither closing a chat nor the hook timeout should cut off its sentence.
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { mkdirSync, writeFileSync, unlinkSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR } from '../src/config.js';
 import { launchIndependentNode } from '../src/independent-process.js';
@@ -10,9 +10,29 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { codexReply, readHookInput } from '../src/codex.js';
 import { readAgentState } from '../src/state.js';
-import { log } from '../src/log.js';
+import { log, errorText } from '../src/log.js';
+
+// A reply file nobody picked up (its worker died first, or this hook was
+// killed between writing it and launching) holds reply text: sweep it. A
+// worker reads its file within seconds of launch.
+function sweepStaleInputs() {
+  try {
+    for (const f of readdirSync(CACHE_DIR)) {
+      if (!/^codex-input-.*\.json$/.test(f)) continue;
+      const file = path.join(CACHE_DIR, f);
+      try {
+        if (Date.now() - statSync(file).mtimeMs > 10 * 60 * 1000) unlinkSync(file);
+      } catch {
+        // taken by its worker in the meantime
+      }
+    }
+  } catch {
+    // no cache dir yet
+  }
+}
 
 try {
+  sweepStaleInputs();
   const payload = await readHookInput(process.stdin);
   const reply = codexReply(payload);
   if (reply && readAgentState('codex').enabled) {
@@ -46,7 +66,7 @@ try {
     }
   }
 } catch (err) {
-  log('codex-stop-hook error', err.code || err.name || 'Error');
+  log('codex-stop-hook error', errorText(err));
 }
 // No continuation/block decisions and no model-visible text.
 process.stdout.write('{}\n');
