@@ -382,6 +382,30 @@ test('a ReadBack reply that starts mid-dictation is quiet from its first sound',
   assert.equal(h.audio.vol('rb'), 0.15);
 });
 
+// The order you hear when you finish dictating and send: the reply that started
+// under your mic comes up to full, and the music stays down until it is done.
+// The incoming voice is the next most important thing, so it takes the floor.
+test('sending your message brings a reply that started under the mic to full, and the music stays down', () => {
+  const h = harness();
+  h.audio.play('mb', 'MusicBee', 0.8);
+  h.audio.mic('claude', true);
+  h.run(400);
+  assert.equal(h.audio.vol('mb'), 0.08);
+  h.pids = [9];
+  h.step();
+  h.audio.play('rb', 'powershell', 1, { pid: 9 });
+  h.run(300);
+  assert.equal(h.audio.vol('rb'), 0.15, 'the reply whispers while you are still talking');
+  h.audio.mic('claude', false);
+  h.run(GONE);
+  assert.equal(h.audio.vol('rb'), 1, 'the reply comes up to full once you send');
+  assert.equal(h.audio.vol('mb'), 0.08, 'the music stays down under the reply');
+  h.pids = [];
+  h.audio.close('rb');
+  h.run(GONE);
+  assert.equal(h.audio.vol('mb'), 0.8, 'and comes back when the reply ends');
+});
+
 test('with nobody dictating, every new player is armed at full', () => {
   const h = harness();
   h.pids = [11];
