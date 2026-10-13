@@ -349,19 +349,68 @@ The settings cover the dip depth for other audio and for ReadBack, which apps co
 
 With ducking on, ReadBack sets its own playback level on every reply: full, or the whisper level while you dictate. A lower level you give "Windows PowerShell" in the Volume Mixer (which is ReadBack's voice) won't stick while ducking is on, so set ReadBack's loudness with your system volume instead.
 
+## Security and privacy
+
+- **The panel is loopback-only.** It listens on `127.0.0.1` and nowhere else.
+  Every request must carry a loopback `Host` header, which defeats DNS
+  rebinding; API requests from other websites are refused, which defeats
+  cross-site request forgery; and the page cannot be framed. It bundles its own
+  logo and fonts, so the page itself loads nothing from the internet. Like any
+  local server, it trusts programs already running on your computer.
+- **`READBACK_ALLOWED_ORIGINS`** is empty by default. It takes a comma-separated
+  list of web origins, such as a dashboard page you run, that may use one route,
+  `/api/state`, from a browser on this machine: to read the saved settings
+  (switches, provider, voice and tuning choices, ducking settings, but never the
+  keys or key hints) and to switch master speech on or off. Nothing else: such a
+  page cannot change the provider, voice, model, tuning, keys or ducking
+  settings, list voices, or make ReadBack speak. The panel still listens only on
+  `127.0.0.1`. Only list origins you control.
+- **Keys are stored in plain text** in `secret.json` under your user profile
+  (`%USERPROFILE%\.readback\secret.json`), so any program running under your
+  account can read them. The panel shows only their last four characters.
+- **What leaves your machine:** synthesis and the voice list call out, by
+  design. Your cleaned, truncated reply text and your API key go to whichever
+  provider you picked (Inworld or ElevenLabs) over HTTPS, and nowhere else.
+  ReadBack has no servers, no telemetry, no analytics, and no update check.
+- **MCP tools and untrusted content.** If your assistant reads untrusted content
+  (web pages, issues, files from strangers), don't auto-approve ReadBack's
+  `say`, `voice_on` and `set_*` tools: instructions planted in that content
+  could make the assistant call them. `say` spends TTS credit directly,
+  `voice_on` turns speech (and so spending) back on, and the `set_*` tools
+  change your settings.
+
+### Why it looks like that
+
+ReadBack does a few things that are unusual for a small Node tool. Each has a
+reason and all of the code is in this repository, but antivirus or EDR software
+may flag them:
+
+- **WMI process launches.** The Codex speech worker and the panel launcher start
+  through WMI (`Win32_Process.Create`), so they run outside the job object of
+  the app that started them and survive Codex's end-of-turn cleanup or the
+  launching app closing.
+- **Hidden PowerShell with `-ExecutionPolicy Bypass`.** Playback runs
+  `scripts/play-stream.ps1` in a hidden PowerShell process, and stopping
+  playback runs a PowerShell command that finds ReadBack's own player processes
+  by command line and ends them. The panel launcher, the ducking helper and the
+  `register` and `shortcut` npm scripts also run PowerShell with Bypass, which
+  lets the bundled scripts run without changing your execution policy. The
+  generated Codex hook command is a PowerShell `-EncodedCommand`, which keeps
+  paths with spaces and quotes intact; it decodes to a call of Node with
+  `hook\codex-stop-hook.js`.
+- **A helper compiled at run time.** For ducking, `scripts/audio-helper.ps1`
+  compiles a small C# Core Audio helper with `Add-Type`. It changes other apps'
+  per-app volume and checks which apps have the microphone open; it never opens
+  the microphone or reads any audio.
+
 ## Notes & limits
 
-- Windows only (PowerShell `SoundPlayer` playback). No STT / voice input.
+- Windows only (PowerShell `SoundPlayer` playback). On other systems the hooks
+  do not synthesize anything, so automatic speech bills nothing. No STT / voice
+  input.
 - Speech is provider-agnostic WAV under the hood (Inworld LINEAR16; ElevenLabs
   PCM wrapped in a WAV header), so the streaming player never cares which
   provider you're on.
-- The panel is loopback-only (`127.0.0.1`), rejects cross-origin requests, and
-  bundles its own logo + fonts, so the page itself loads nothing from the
-  internet.
-- Synthesis *does* call out, by design: your cleaned, truncated reply text and
-  your API key go to whichever provider you picked (Inworld or ElevenLabs) over
-  HTTPS, and nowhere else. ReadBack has no servers, no telemetry, no analytics,
-  and no update check.
 - **It costs money per character spoken.** Inworld defaults to TTS-2 Flash
   (inworld-tts-2-flash), its most cost-efficient current model. TTS-2 flagship
   (inworld-tts-2) adds Stable, Balanced and Creative delivery modes. Flash exposes
