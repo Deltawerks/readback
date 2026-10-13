@@ -57,7 +57,7 @@ disk:
 The hooks and the MCP controls work whether or not the panel is open. Ducking
 needs the panel.
 
-## Setup (Windows, Node 18+)
+## Setup (Windows, Node 20+)
 
 ```powershell
 git clone https://github.com/Deltawerks/readback

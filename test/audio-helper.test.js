@@ -9,7 +9,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = path.join(ROOT, 'scripts', 'audio-helper.ps1');
-const WIN = process.platform === 'win32';
+// These run the real audio helper against a silent test app through the real
+// Windows mixer, so they are opt-in: `npm run test:audio` sets this. A plain
+// `npm test` must never touch anyone's volume levels. Only one audio helper can
+// run per Windows session, so switch ReadBack's own ducking off first.
+const WIN = process.platform === 'win32' && process.env.READBACK_AUDIO_TESTS === '1';
 // A fixed location, so Windows keeps one remembered level for the test app
 // rather than one per run.
 const TOOLS = path.join(tmpdir(), 'readback-test-tone');
