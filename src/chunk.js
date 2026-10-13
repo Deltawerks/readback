@@ -4,11 +4,18 @@
 //
 // The FIRST sentence is always its own chunk (snappiest start); later sentences
 // are grouped up to maxChunk to keep the number of round-trips down.
+//
+// A sentence ends at . ! ? or … (and any closing quote or bracket) only where
+// whitespace and then a capital, a digit or an opening quote follow, or at the
+// end of the text. A bare period is not enough: src/state.js, 0.7.0, 2.5 and
+// e.g. were each cut in two.
+const SENTENCE = /\S[\s\S]*?[.!?…]+["'”’)\]]*(?=\s+["'“‘(\[]*[\p{Lu}\p{N}]|\s*$)|\S[\s\S]*$/gu;
+
 export function chunkForSpeech(text, { maxChunk = 300 } = {}) {
   const t = (text || '').trim();
   if (!t) return [];
 
-  const sentences = (t.match(/[^.!?…]+[.!?…]+["'")\]]*|\S[^.!?…]*$/g) || [t])
+  const sentences = (t.match(SENTENCE) || [t])
     .map((s) => s.trim())
     .filter(Boolean);
 
