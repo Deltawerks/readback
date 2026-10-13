@@ -104,6 +104,7 @@ function startHelper() {
     child,
     exited,
     logs,
+    stderr: () => stderr,
     send: (o) => child.stdin.write(`${JSON.stringify(o)}\n`),
     waitFor: (match, ms = 20000) =>
       new Promise((resolve, reject) => {
@@ -117,11 +118,25 @@ function startHelper() {
 const sessionOf = (m, pid) => (m.t === 'state' ? m.out.find((s) => s.pid === pid) : undefined);
 const near = (a, b) => Math.abs(a - b) < 0.01;
 
+// Only one helper runs per Windows session. One that is still finishing its
+// put-back after being told to stop holds that place for a moment, and a new
+// one is turned away (exit 4) meanwhile; try again until it is free.
+async function readyHelper() {
+  for (let attempt = 0; ; attempt++) {
+    const h = startHelper();
+    const ready = h.waitFor((m) => m.t === 'ready', 60000);
+    const code = await Promise.race([ready.then(() => null), h.exited]);
+    if (code === null) return h;
+    ready.catch(() => {});
+    if (code !== 4 || attempt >= 20) throw new Error(`the helper exited with ${code}: ${h.stderr()}`);
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
 // Reads a process's current level through a fresh helper, the way ReadBack would.
 async function levelOf(pid) {
-  const h = startHelper();
+  const h = await readyHelper();
   try {
-    await h.waitFor((m) => m.t === 'ready', 60000);
     return sessionOf(await h.waitFor((m) => Boolean(sessionOf(m, pid))), pid).vol;
   } finally {
     h.child.stdin.end();
@@ -132,8 +147,7 @@ async function levelOf(pid) {
 test('the helper lowers a session and puts it back when its stdin closes', { skip: !WIN, timeout: 120000 }, async () => {
   const tone = startTone();
   try {
-    const h = startHelper();
-    await h.waitFor((m) => m.t === 'ready', 60000);
+    const h = await readyHelper();
     const s = sessionOf(await h.waitFor((m) => Boolean(sessionOf(m, tone.pid))), tone.pid);
     assert.equal(s.name, 'rb-test-tone');
     const orig = s.vol;
@@ -197,8 +211,7 @@ test('the helper still puts levels back when the process that started it is kill
 });
 
 test('an arm applies to a session the process only creates afterwards', { skip: !WIN, timeout: 120000 }, async () => {
-  const h = startHelper();
-  await h.waitFor((m) => m.t === 'ready', 60000);
+  const h = await readyHelper();
   const tone = startTone(1500); // its sound starts 1.5 s after launch
   try {
     h.send({ c: 'arm', seq: 1, pid: tone.pid, vol: 0.2 });
@@ -218,26 +231,42 @@ test('an arm applies to a session the process only creates afterwards', { skip: 
 test('a level the user moved is left alone when the helper exits, and junk input is ignored', { skip: !WIN, timeout: 180000 }, async () => {
   const tone = startTone();
   try {
-    const a = startHelper();
-    await a.waitFor((m) => m.t === 'ready', 60000);
+    const a = await readyHelper();
     const s = sessionOf(await a.waitFor((m) => Boolean(sessionOf(m, tone.pid))), tone.pid);
     a.child.stdin.write('this is not json\n');
     a.send({ c: 'set', seq: 1, key: s.key, vol: 0.25, orig: s.vol });
     await a.waitFor((m) => m.seq >= 1 && near(sessionOf(m, tone.pid)?.vol ?? -1, 0.25));
-    // "The user" moves it, through a second helper.
-    const b = startHelper();
-    await b.waitFor((m) => m.t === 'ready', 60000);
-    b.send({ c: 'set', seq: 1, key: s.key, vol: 0.6 });
-    await b.waitFor((m) => m.seq >= 1 && near(sessionOf(m, tone.pid)?.vol ?? -1, 0.6));
+    // "The user" moves it. A set with no original changes the level without
+    // touching what the helper remembers setting, which is exactly how a drag
+    // in the Volume Mixer looks to it. (Only one helper can run per session,
+    // so this cannot come from a second one.)
+    a.send({ c: 'set', seq: 2, key: s.key, vol: 0.6 });
+    await a.waitFor((m) => m.seq >= 2 && near(sessionOf(m, tone.pid)?.vol ?? -1, 0.6));
     a.child.stdin.end();
     await a.exited;
     assert.ok(near(await levelOf(tone.pid), 0.6), 'the user level survived the helper exiting');
-    b.send({ c: 'set', seq: 2, key: s.key, vol: s.vol }); // tidy up
-    await b.waitFor((m) => m.seq >= 2);
+    const b = await readyHelper(); // tidy up
+    b.send({ c: 'set', seq: 1, key: s.key, vol: s.vol });
+    await b.waitFor((m) => m.seq >= 1);
     b.child.stdin.end();
     await b.exited;
   } finally {
     tone.kill();
+  }
+});
+
+// Two helpers would each take the other's lowered levels for originals and
+// fight over every app (a second panel on another port, say).
+test('a second helper in the same session refuses to start and says why', { skip: !WIN, timeout: 120000 }, async () => {
+  const first = await readyHelper();
+  try {
+    const second = startHelper();
+    assert.equal(await second.exited, 4);
+    assert.match(second.stderr(), /already running/);
+    first.send({ c: 'quit' });
+    assert.equal(await first.exited, 0, 'the first one was not disturbed');
+  } finally {
+    first.child.kill();
   }
 });
 
@@ -254,8 +283,7 @@ test('a lowered powershell.exe level carried over by Windows is undone when the 
       stdio: 'ignore',
       windowsHide: true,
     });
-  const h = startHelper();
-  await h.waitFor((m) => m.t === 'ready', 60000);
+  const h = await readyHelper();
   const first = ps();
   h.send({ c: 'arm', seq: 1, pid: first.pid, vol: 0.3 });
   await h.waitFor((m) => near(sessionOf(m, first.pid)?.vol ?? -1, 0.3));

@@ -19,6 +19,10 @@
 # src/ducking.js, which the panel's driver runs; this helper only applies the
 # levels it is sent and reports the audio sessions Windows lists.
 #
+# Only one helper runs per Windows session. A second one (a second panel, on
+# another port) exits at once with code 4 and says why on stderr: two helpers
+# would each take the other's lowered levels for originals.
+#
 # Windows PowerShell 5.1 compiles the C# below with the .NET Framework compiler,
 # so it sticks to C# 5: no string interpolation, no ?., no nameof, no out var.
 $ErrorActionPreference = 'Stop'
@@ -167,6 +171,15 @@ namespace ReadbackAudio
     {
         const int RENDER = 0, CAPTURE = 1, ACTIVE_DEVICES = 1, CLSCTX_ALL = 0x17;
         const int ACTIVE = 1, EXPIRED = 2;
+        // New sessions arrive through Windows' notification; this rescan is a
+        // backstop for one it missed, and runs at once when a device appears.
+        // Rescanning every second while holding every session open grew the
+        // helper by about 70 MB an hour.
+        const int DISCOVER_MS = 10000;
+        // While nothing is lowered or armed below full, let go of every session
+        // and take them again, so whatever Windows builds up per session between
+        // rescans is handed back.
+        const int RETRACK_MS = 5 * 60 * 1000;
         static readonly Guid IidManager2 = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
         static readonly Guid ClsidEnumerator = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
         // Tags our own changes in Windows' volume-change notifications.
@@ -304,14 +317,26 @@ namespace ReadbackAudio
                 Emit("{\"t\":\"ready\",\"v\":1}");
                 DateTime devicesAt = DateTime.UtcNow;
                 DateTime discoverAt = DateTime.UtcNow;
+                DateTime retrackAt = DateTime.UtcNow;
                 DateTime outAt = DateTime.MinValue;
                 while (!stopping)
                 {
                     bool applied = DrainCommands();
                     DrainCreated();
                     DateTime now = DateTime.UtcNow;
-                    if ((now - devicesAt).TotalMilliseconds >= 5000) { RefreshEndpoints(); devicesAt = now; }
-                    if ((now - discoverAt).TotalMilliseconds >= 1000) { Discover(); discoverAt = now; }
+                    bool newDevice = false;
+                    if ((now - devicesAt).TotalMilliseconds >= 5000) { newDevice = RefreshEndpoints(); devicesAt = now; }
+                    if ((now - retrackAt).TotalMilliseconds >= RETRACK_MS && Idle())
+                    {
+                        Retrack();
+                        retrackAt = now;
+                        discoverAt = now;
+                    }
+                    else if (newDevice || (now - discoverAt).TotalMilliseconds >= DISCOVER_MS)
+                    {
+                        Discover();
+                        discoverAt = now;
+                    }
                     bool readOut = applied || (now - outAt).TotalMilliseconds >= 100;
                     if (readOut) outAt = now;
                     Poll(readOut);
@@ -351,8 +376,10 @@ namespace ReadbackAudio
             return any;
         }
 
-        void RefreshEndpoints()
+        // True when a device appeared, so its existing sessions get scanned now.
+        bool RefreshEndpoints()
         {
+            bool added = false;
             HashSet<string> seen = new HashSet<string>();
             foreach (int flow in new int[] { RENDER, CAPTURE })
             {
@@ -391,11 +418,13 @@ namespace ReadbackAudio
                         Log("no new-session events on a device: " + e.Message);
                     }
                     endpoints[id] = ep;
+                    added = true;
                 }
             }
             List<string> gone = new List<string>();
             foreach (string id in endpoints.Keys) if (!seen.Contains(id)) gone.Add(id);
             foreach (string id in gone) endpoints.Remove(id);
+            return added;
         }
 
         void Discover()
@@ -404,12 +433,19 @@ namespace ReadbackAudio
             {
                 IAudioSessionEnumerator list;
                 if (ep.Manager.GetSessionEnumerator(out list) != 0 || list == null) continue;
-                int count;
-                list.GetCount(out count);
-                for (int i = 0; i < count; i++)
+                try
                 {
-                    object so;
-                    if (list.GetSession(i, out so) == 0 && so != null) Track(ep, so);
+                    int count;
+                    list.GetCount(out count);
+                    for (int i = 0; i < count; i++)
+                    {
+                        object so;
+                        if (list.GetSession(i, out so) == 0 && so != null) Keep(ep, so);
+                    }
+                }
+                finally
+                {
+                    Marshal.ReleaseComObject(list);
                 }
             }
         }
@@ -417,16 +453,55 @@ namespace ReadbackAudio
         void DrainCreated()
         {
             KeyValuePair<Endpoint, object> item;
-            while (created.TryDequeue(out item)) Track(item.Key, item.Value);
+            while (created.TryDequeue(out item)) Keep(item.Key, item.Value);
         }
 
-        void Track(Endpoint ep, object so)
+        // Every rescan hands back a reference to each session again. One that is
+        // not kept (already tracked, expired, unreadable) is released at once:
+        // for a session already held this only balances the count on the same
+        // wrapper, and anything else would sit waiting for the finalizer.
+        void Keep(Endpoint ep, object so)
+        {
+            bool kept = false;
+            try { kept = Track(ep, so); }
+            catch { }
+            if (!kept)
+            {
+                try { Marshal.ReleaseComObject(so); }
+                catch { }
+            }
+        }
+
+        // Nothing lowered and no player held below full: nothing would be lost
+        // by letting go of every session for a moment.
+        bool Idle()
+        {
+            if (remembered.Count > 0 || !commands.IsEmpty) return false;
+            foreach (float v in arms.Values) if (v < 0.999f) return false;
+            return true;
+        }
+
+        void Retrack()
+        {
+            DrainCreated();
+            foreach (Session x in sessions.Values)
+            {
+                try { if (x.Control != null) Marshal.FinalReleaseComObject(x.Control); }
+                catch { }
+            }
+            sessions.Clear();
+            expired.Clear();
+            names.Clear();
+            Discover();
+        }
+
+        bool Track(Endpoint ep, object so)
         {
             IAudioSessionControl2 control = so as IAudioSessionControl2;
-            if (control == null) return;
+            if (control == null) return false;
             string key;
-            if (control.GetSessionInstanceIdentifier(out key) != 0 || key == null) return;
-            if (sessions.ContainsKey(key) || expired.Contains(key)) return;
+            if (control.GetSessionInstanceIdentifier(out key) != 0 || key == null) return false;
+            if (sessions.ContainsKey(key) || expired.Contains(key)) return false;
             uint pid;
             control.GetProcessId(out pid);
             Session x = new Session();
@@ -445,6 +520,7 @@ namespace ReadbackAudio
             float level;
             if (x.Volume != null && x.Volume.GetMasterVolume(out level) == 0) x.Level = level;
             sessions[key] = x;
+            return true;
         }
 
         bool IsPowerShell(uint pid)
@@ -496,6 +572,8 @@ namespace ReadbackAudio
                 expired.Add(key);
                 remembered.Remove(key);
                 names.Remove(x.Pid); // the pid may be reused by a new process
+                try { if (x.Control != null) Marshal.FinalReleaseComObject(x.Control); }
+                catch { }
             }
         }
 
@@ -612,6 +690,15 @@ namespace ReadbackAudio
 }
 '@
 
+# One helper per Windows session, decided before anything is compiled.
+$single = New-Object System.Threading.Mutex($false, 'Local\ReadBackAudioHelper')
+$owned = $false
+try { $owned = $single.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) {
+  [Console]::Error.WriteLine('Another ReadBack audio helper is already running in this Windows session; only one can manage the volume levels.')
+  exit 4
+}
+
 Add-Type -TypeDefinition $source -Language CSharp
 
 $helper = New-Object ReadbackAudio.Helper
@@ -649,4 +736,5 @@ try {
 }
 finally {
   $helper.Stop()
+  $single.ReleaseMutex()
 }
