@@ -40,7 +40,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 //
 // Returns { spoken, total, aborted?, truncated?, playerFailed? }: spoken is the
 // number of chunks actually delivered to the player, which is what the worker
-// logs; playerFailed is the exit code of a player that quit before the end.
+// logs; playerFailed says how a player that quit before the end went: its exit
+// code, a signal name, or a spawn error code.
 export async function speak(text, st, { wait = false, queue = false } = {}) {
   // Playback goes through Windows PowerShell. Anywhere else the player cannot
   // start, and that used to surface only after the whole reply was paid for.
@@ -171,17 +172,37 @@ export async function speak(text, st, { wait = false, queue = false } = {}) {
   let truncated = false;
   let playerFailed;
   let queuedMs = wavDurationMs(first);
-  const playStarted = Date.now();
+  // A monotonic clock: a wall clock set back mid-reply would make this wait
+  // until real time caught up, long after the player had given up.
+  const playStarted = performance.now();
+  // While waiting, an unreadable settings file means "unknown", not "off"
+  // (stillEnabled): this runs four times a second for the whole reply. The
+  // check before each synthesis still needs a definite yes.
+  const lineMaybeOurs = () => currentEpoch() === epoch && stillEnabled();
+  // Around each paid synthesis the answer has to be a definite yes, but a file
+  // a scanner is holding for a moment is waited out rather than taken for "off":
+  // every stop also bumps an epoch, which needs no settings read to see.
+  const lineStillOursWaiting = async () => {
+    for (let waited = 0; ; waited += 250) {
+      if (currentEpoch() !== epoch || currentEpoch(agent) !== agentEpoch) return false;
+      try {
+        return readAgentState(agent).enabled === true;
+      } catch (err) {
+        if (!(err instanceof StateUnreadableError) || waited >= 10000) return false;
+      }
+      await sleep(250);
+    }
+  };
   const rest = (async () => {
     try {
       for (let i = 1; i < total; i++) {
-        while (queuedMs - (Date.now() - playStarted) > LOOKAHEAD_MS && lineStillOurs() && playerAlive()) {
+        while (queuedMs - (performance.now() - playStarted) > LOOKAHEAD_MS && lineMaybeOurs() && playerAlive()) {
           await sleep(250);
         }
-        if (!lineStillOurs()) return;
+        if (!(await lineStillOursWaiting())) return;
         if (!playerAlive()) { playerFailed = playerExit; return; }
         const audio = await synthesize(chunks[i], st);
-        if (!lineStillOurs()) return;
+        if (!(await lineStillOursWaiting())) return;
         if (!playerAlive()) { playerFailed = playerExit; return; }
         if (!writeChunk(dir, i, audio)) return;
         written = i + 1;

@@ -38,6 +38,15 @@ const FIXTURE = `
     record({ event: 'kill', epoch });
     return Buffer.alloc(0);
   };
+  // A scenario can make the settings file unreadable for a while, the way an
+  // antivirus scan holding it does: globalThis.busyUntil = performance.now() + ms.
+  const realRead = fs.readFileSync;
+  fs.readFileSync = function (file, ...rest) {
+    if (performance.now() < (globalThis.busyUntil || 0) && String(file).endsWith('state.json')) {
+      const err = new Error('EBUSY: resource busy or locked'); err.code = 'EBUSY'; throw err;
+    }
+    return realRead.call(this, file, ...rest);
+  };
   syncBuiltinESMExports();
   const wav = (ms) => {
     const data = Math.round(ms * 32);
@@ -156,4 +165,36 @@ test('synthesis stays about half a minute ahead of playback, so a stop saves the
   `);
   // Ten-second chunks: the first plus three more covers the 30 s lookahead.
   assert.equal(count('synthesize'), 4);
+});
+
+// Pacing measured the playhead with the wall clock: a clock set back mid-reply
+// made synthesis wait until real time caught up, and the player gave up.
+test('a clock set back mid-reply does not stall the rest of it', { timeout: 60000 }, () => {
+  const { count } = run({ RB_FAKE_PLAYER: 'stay', RB_FAKE_WAV_MS: '10000' }, `
+    await speak(${JSON.stringify(reply(12))}, readAgentState('claude'), { wait: false, queue: true });
+    const real = Date.now;
+    Date.now = () => real() - 10 * 60 * 1000;
+    await sleep(11500);
+    Date.now = real;
+    flushQueue();
+    stopPlayback();
+    await sleep(600);
+  `);
+  // Four chunks cover the first 30 s; the fifth is due once 10 s have played.
+  assert.ok(count('synthesize') >= 5, `only ${count('synthesize')} chunks after 11.5 s`);
+});
+
+// The wait between chunks reads the settings four times a second. A file that
+// cannot be read for a moment (an antivirus scan) counted as "voice off" and
+// ended the reply with no cue.
+test('a settings file that cannot be read for a moment does not end a reply', { timeout: 60000 }, () => {
+  const { count } = run({ RB_FAKE_PLAYER: 'stay', RB_FAKE_WAV_MS: '10000' }, `
+    await speak(${JSON.stringify(reply(12))}, readAgentState('claude'), { wait: false, queue: true });
+    globalThis.busyUntil = performance.now() + 1500;
+    await sleep(11500);
+    flushQueue();
+    stopPlayback();
+    await sleep(600);
+  `);
+  assert.ok(count('synthesize') >= 5, `only ${count('synthesize')} chunks after 11.5 s`);
 });
