@@ -80,6 +80,56 @@ test('cleanStale drops tickets whose process has died, keeps live ones', () => {
   clearTickets();
 });
 
+// A ticket that sits behind ten minutes of speech is still in line. Aging
+// tickets from when they were written threw such a waiter's ticket away, its
+// owner then took the front, and two replies started on top of each other.
+function ticketFrom(msAgo) {
+  const t = Date.now() - msAgo;
+  const name = `${String(t).padStart(15, '0')}-${String(process.pid).padStart(7, '0')}-${String(msAgo % 9999).padStart(4, '0')}.json`;
+  if (!existsSync(QUEUE_DIR)) mkdirSync(QUEUE_DIR, { recursive: true });
+  const file = path.join(QUEUE_DIR, name);
+  writeFileSync(file, JSON.stringify({ pid: process.pid, ts: t }));
+  return { name, file, pid: process.pid };
+}
+
+test('a reply that has waited more than ten minutes keeps its place', () => {
+  clearTickets();
+  const old = ticketFrom(11 * 60 * 1000);
+  cleanStale();
+  assert.ok(tickets().includes(old.name));
+  clearTickets();
+});
+
+test('two waiting replies are never let through together', async () => {
+  clearTickets();
+  writeState({ lastPid: null });
+  const first = ticketFrom(11 * 60 * 1000);
+  const second = ticketFrom(60 * 1000);
+  const granted = [];
+  const wait = (t, label) => waitTurn(t, currentEpoch(), { stillWanted: () => true, pollMs: 20 }).then((ok) => ok && granted.push(label));
+  const both = Promise.all([wait(first, 'first'), wait(second, 'second')]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.deepEqual(granted, ['first'], 'only the front of the line goes');
+  releaseTicket(first);
+  await both;
+  assert.deepEqual(granted, ['first', 'second']);
+  clearTickets();
+});
+
+test('a waiter whose ticket was taken for abandoned puts it back in the same place', async () => {
+  clearTickets();
+  writeState({ lastPid: null });
+  const ahead = ticketFrom(2000);
+  const mine = ticketFrom(1000);
+  const turn = waitTurn(mine, currentEpoch(), { stillWanted: () => true, pollMs: 20 });
+  releaseTicket(mine); // e.g. swept after a long sleep
+  await new Promise((r) => setTimeout(r, 200));
+  assert.deepEqual(tickets(), [ahead.name, mine.name]);
+  releaseTicket(ahead);
+  assert.equal(await turn, true);
+  clearTickets();
+});
+
 test('isFront fails open when our ticket vanished (never wait forever)', () => {
   clearTickets();
   writeTicket('000000000000500-0000009.json', process.pid); // someone ahead of us

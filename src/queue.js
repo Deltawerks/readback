@@ -11,6 +11,8 @@ import {
   readdirSync,
   existsSync,
   unlinkSync,
+  statSync,
+  utimesSync,
 } from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR } from './config.js';
@@ -85,16 +87,16 @@ export function releaseTicket(ticket) {
   }
 }
 
-// Drop tickets whose owning process has died, so a crashed or killed session
-// can never wedge the queue behind it.
-// No utterance legitimately holds the line this long. Past it a ticket is
-// treated as abandoned regardless of what its pid looks like: pids are reused,
-// especially across a reboot, so "its pid is alive" can be a different program
-// entirely. Without this, one leftover ticket silently blocks every reply
-// forever and voice just stops working the next day.
-const MAX_TICKET_AGE_MS = 10 * 60 * 1000;
+// Drop tickets whose owner is gone, so a crashed or killed session can never
+// wedge the queue behind it. A waiter touches its ticket every time it polls,
+// so a ticket nobody has touched for this long belongs to a process that died
+// or hung, whatever its pid points at now (pids are reused, especially across
+// a reboot). Age is measured from that last touch, never from when the ticket
+// was written: a reply waiting behind ten minutes of speech is still in line,
+// and aging it out let its owner and the next in line start together.
+const TICKET_STALE_MS = 30 * 1000;
 
-export function cleanStale() {
+export function cleanStale(now = Date.now()) {
   let files;
   try {
     files = readdirSync(QUEUE_DIR);
@@ -105,16 +107,15 @@ export function cleanStale() {
     if (!f.endsWith('.json')) continue;
     const p = path.join(QUEUE_DIR, f);
     let pid = null;
-    let ts = 0;
+    let touched = 0;
     try {
-      const t = JSON.parse(readFileSync(p, 'utf8'));
-      pid = t.pid;
-      ts = t.ts || 0;
+      pid = JSON.parse(readFileSync(p, 'utf8')).pid;
+      touched = statSync(p).mtimeMs;
     } catch {
-      // unreadable / torn write; treat as dead and remove
+      // unreadable / torn write; treat as dead and remove (a live waiter puts
+      // its ticket back on its next poll)
     }
-    const tooOld = ts > 0 && Date.now() - ts > MAX_TICKET_AGE_MS;
-    if (tooOld || !pidAlive(pid)) {
+    if (now - touched > TICKET_STALE_MS || !pidAlive(pid)) {
       try {
         unlinkSync(p);
       } catch {
@@ -140,6 +141,23 @@ export function isFront(ticket) {
   return files[0] === ticket.name;
 }
 
+// The heartbeat that keeps our place in line. If our ticket was taken for
+// abandoned (after a long sleep, say), put it back: its name carries the time
+// it was first written, so it returns to the same place.
+function touchTicket(ticket) {
+  const now = new Date();
+  try {
+    utimesSync(ticket.file, now, now);
+  } catch {
+    try {
+      ensureQueueDir();
+      writeFileSync(ticket.file, JSON.stringify({ pid: ticket.pid, ts: Date.now() }));
+    } catch {
+      // isFront fails open below, so a reply is never left waiting forever
+    }
+  }
+}
+
 // Nothing legitimately waits this long. Past it, something is wrong with the
 // bookkeeping and giving up (logged) beats a worker polling forever.
 const MAX_WAIT_MS = 20 * 60 * 1000;
@@ -155,6 +173,7 @@ export async function waitTurn(ticket, myEpoch, { stillWanted, pollMs = 120, max
   for (;;) {
     if (currentEpoch() !== myEpoch) return false; // a stop / flush happened
     if (stillWanted && !stillWanted()) return false; // e.g. voice toggled off
+    touchTicket(ticket);
     cleanStale();
     if (isFront(ticket) && !anyPlayerAlive()) return true;
     if (Date.now() > giveUpAt) {
