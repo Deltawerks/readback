@@ -1,4 +1,4 @@
-# Readback
+# ReadBack
 
 **Voice for Claude and Codex.** Flip it on and your assistant reads its replies aloud,
 so you can rest your eyes or keep half an ear on a long run instead of watching
@@ -9,30 +9,34 @@ Works with Claude Code (including inside Claude Desktop) and local Codex
 desktop/CLI chats on Windows. Each assistant has its own saved voice settings.
 
 <p align="center">
-  <img src="img/readback-profiles.jpg" alt="Readback control panel" width="420" />
+  <img src="img/readback-profiles.jpg" alt="ReadBack control panel" width="420" />
 </p>
 
-- 🪟 **Windows-first.** Plays through built-in PowerShell audio, with zero
-  external dependencies. (Most Claude voice tools are macOS-only.)
-- 🎚️ **Two providers.** [Inworld](https://inworld.ai) (hundreds of voices, cheap)
-  and [ElevenLabs](https://elevenlabs.io), switchable in a click.
-- 🖥️ **GUI-tunable.** A little control panel for voice, model, speed and
+- **Windows only.** Plays through Windows' built-in audio (PowerShell's
+  SoundPlayer), so there is no ffmpeg, mpv or VLC to install.
+- **Two providers.** [Inworld](https://inworld.ai) and
+  [ElevenLabs](https://elevenlabs.io), switchable in a click. The voice picker
+  lists up to 200 of Inworld's English voices, or the voices on your ElevenLabs
+  account. Both bill per character spoken.
+- **GUI-tunable.** A little control panel for voice, model, speed and
   delivery, with separate Claude/Codex tabs, a live voice picker and in-app key entry. No `.env` fiddling.
-- ⚡ **Streaming.** Splits replies into sentences and starts talking on the first
+- **Streaming.** Splits replies into sentences and starts talking on the first
   one, so audio kicks in fast even on long messages.
-- 🔀 **Multi-session.** Running Claude and Codex across several projects? Their replies
+- **Multi-session.** Running Claude and Codex across several projects? Their replies
   **queue and read in order** instead of cutting each other off. Voice off still
   silences everything instantly.
+- **Ducking (optional).** Music and other apps dip while ReadBack speaks or
+  while you dictate, then come back. Off until you switch it on.
 
 > Unofficial community tool. Not affiliated with, or endorsed by, Anthropic, OpenAI,
 > Inworld, or ElevenLabs.
 
-**Already using it?** The 0.6 release adds Codex and independent agent profiles;
-0.6.2 protects Codex playback from end-of-turn cleanup, and 0.6.3 fixes speech in
-long-running Codex chats with large transcripts. Existing
-voices and speeds seed both profiles; deprecated Inworld models move to TTS-2
-Flash. The saved master mute and provider keys are preserved. See
-the [changelog](CHANGELOG.md) and the Codex setup below.
+**Upgrading from 0.5.x?** 0.7.0 adds Codex support, separate Claude and Codex
+voice profiles, Inworld TTS-2 and optional music ducking. Your voices, speeds,
+keys and master switch carry over; a saved Inworld TTS-1 or TTS-1.5 model moves
+to TTS-2 Flash. See the [changelog](CHANGELOG.md). After `git pull`, run
+`npm install`, then restart the panel and any open Claude or Codex sessions so
+their ReadBack MCP server reloads.
 
 ---
 
@@ -106,7 +110,7 @@ snippet's `"Stop"` entry **inside** it, alongside the hooks you already have:
 > before is dropped, silently, with no error anywhere.
 
 If you already have a `"Stop"` array of your own, the same rule applies one level
-down: add Readback's `{ "hooks": [ ... ] }` entry to that existing array instead
+down: add ReadBack's `{ "hooks": [ ... ] }` entry to that existing array instead
 of adding a second `"Stop"` key.
 
 Use the path from *your* generated snippet, not the one above. Then **restart
@@ -181,7 +185,7 @@ cannot control separate profiles, and older Inworld models are deprecated.
 If Codex is silent, check hook trust, both master and Codex switches, and `readback.log` in
 the cache directory. Connecting the MCP server alone does not enable auto-speak.
 
-**Optional:** `npm run shortcut` drops a "Readback" icon on your Desktop that
+**Optional:** `npm run shortcut` drops a "ReadBack" icon on your Desktop that
 opens the panel in one click.
 
 Quick smoke test, neither assistant required:
@@ -260,7 +264,7 @@ Working files (the log, the queue, the list of running players, the WAV chunks)
 live separately in `%USERPROFILE%\.readback\cache` (`~/.cache/readback` elsewhere), so
 they can't bloat a synced profile. Override that with `READBACK_CACHE_DIR`.
 
-> **If you override either path, set it for every Readback process, not just
+> **If you override either path, set it for every ReadBack process, not just
 > one.** The panel, the MCP server and each hook worker resolve these
 > independently from the environment they were launched in. When they disagree,
 > the toggle appears to work and controls nothing, because the half that speaks
@@ -305,7 +309,7 @@ With ducking on, ReadBack sets its own playback level on every reply: full, or t
   internet.
 - Synthesis *does* call out, by design: your cleaned, truncated reply text and
   your API key go to whichever provider you picked (Inworld or ElevenLabs) over
-  HTTPS, and nowhere else. Readback has no servers, no telemetry, no analytics,
+  HTTPS, and nowhere else. ReadBack has no servers, no telemetry, no analytics,
   and no update check.
 - **It costs money per character spoken.** Inworld defaults to TTS-2 Flash
   (inworld-tts-2-flash), its most cost-efficient current model. TTS-2 flagship
