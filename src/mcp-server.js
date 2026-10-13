@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -7,14 +8,17 @@ import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
 import { speak } from './speak.js';
-import { PROVIDER_IDS, getProvider } from './providers/index.js';
+import { PROVIDER_IDS, getProvider, clampKnobs } from './providers/index.js';
 import { log } from './log.js';
 
 const SOURCE = process.env.READBACK_SOURCE === 'codex' ? 'codex' : 'claude';
 const readState = () => readAgentState(SOURCE);
-const updateProviderConfig = (provider, patch) => writeAgentState(SOURCE, { [provider]: patch });
+// Same cleaning as the panel's saves, so a model cannot store what a person
+// using the panel could not.
+const updateProviderConfig = (provider, patch) => writeAgentState(SOURCE, { [provider]: clampKnobs(provider, patch) });
 
-const server = new McpServer({ name: 'readback', version: '0.6.3' });
+const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const server = new McpServer({ name: 'readback', version });
 
 function summarize(st) {
   const c = activeConfig(st);
@@ -161,7 +165,7 @@ server.registerTool(
   async ({ voiceId }) => {
     const st = readState();
     updateProviderConfig(st.provider, { voiceId });
-    return text(`voice → ${voiceId} (${st.provider})`);
+    return text(`voice → ${activeConfig(readState()).voiceId} (${st.provider})`);
   }
 );
 
@@ -175,7 +179,7 @@ server.registerTool(
   async ({ modelId }) => {
     const st = readState();
     updateProviderConfig(st.provider, { modelId });
-    return text(`model → ${modelId} (${st.provider})`);
+    return text(`model → ${activeConfig(readState()).modelId} (${st.provider})`);
   }
 );
 
