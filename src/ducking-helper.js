@@ -4,6 +4,11 @@ import path from 'node:path';
 import { ROOT } from './config.js';
 
 export const HELPER_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper.ps1');
+// Started detached, so it lives outside the panel server's job object and the
+// helper behind it survives the panel long enough to put levels back. The
+// relay's header explains why the helper cannot simply be spawned directly.
+export const RELAY_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper-relay.js');
+const HELPER_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', HELPER_SCRIPT];
 const BACKOFF_MS = [1000, 2000, 5000, 15000, 30000];
 
 // Windows PowerShell reads stdin in the console code page, so anything outside
@@ -19,8 +24,9 @@ export function asciiJson(value) {
 // when it dies, and on stop closes its stdin, which is its signal to put back
 // what it lowered and exit.
 export function createHelperSupervisor({
-  command = 'powershell.exe',
-  args = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', HELPER_SCRIPT],
+  command = process.execPath,
+  args = [RELAY_SCRIPT, 'powershell.exe', ...HELPER_ARGS],
+  detached = true,
   onMessage = () => {},
   onStatus = () => {},
   log = () => {},
@@ -54,7 +60,7 @@ export function createHelperSupervisor({
     setStatus(failures ? 'restarting' : 'starting');
     let proc;
     try {
-      proc = spawnFn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      proc = spawnFn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached });
     } catch (err) {
       log(`ducking: could not start the audio helper: ${err.message}`);
       scheduleRestart(err.message);

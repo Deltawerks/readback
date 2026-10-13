@@ -5,7 +5,7 @@ import { mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HELPER = path.join(ROOT, 'scripts', 'audio-helper.ps1');
@@ -139,6 +139,55 @@ test('the helper lowers a session and puts it back when its stdin closes', { ski
     await h.exited;
     assert.ok(near(await levelOf(tone.pid), orig), 'put back on EOF');
   } finally {
+    tone.kill();
+  }
+});
+
+// The panel server dying is the case the EOF restore exists for, and closing
+// stdin from a live parent does not exercise it: on Windows, Node kills every
+// non-detached child the moment the parent exits.
+test('the helper still puts levels back when the process that started it is killed', { skip: !WIN, timeout: 120000 }, async () => {
+  const tone = startTone();
+  const mod = pathToFileURL(path.join(ROOT, 'src', 'ducking-helper.js')).href;
+  // A stand-in panel server: starts the helper the way ReadBack does, lowers
+  // the tone app, says so, then waits to be killed.
+  const code = `
+    const { createHelperSupervisor } = await import(${JSON.stringify(mod)});
+    let key = null, orig = null, said = false;
+    const sup = createHelperSupervisor({ onMessage: (m) => {
+      if (m.t !== 'state') return;
+      const s = m.out.find((x) => x.pid === ${tone.pid});
+      if (!s) return;
+      if (key === null) {
+        key = s.key;
+        orig = s.vol;
+        sup.send({ c: 'set', seq: 1, key, vol: 0.25, orig });
+        return;
+      }
+      if (!said && m.seq >= 1 && Math.abs(s.vol - 0.25) < 0.01) {
+        said = true;
+        console.log('LOWERED ' + orig);
+      }
+    } });
+    sup.start();
+    setInterval(() => {}, 1000);
+  `;
+  const parent = spawn(process.execPath, ['--input-type=module', '-e', code], { stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    const orig = await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('the stand-in panel never lowered the tone')), 60000);
+      createInterface({ input: parent.stdout }).on('line', (line) => {
+        const m = /^LOWERED ([\d.]+)/.exec(line);
+        if (!m) return;
+        clearTimeout(timer);
+        resolve(Number(m[1]));
+      });
+    });
+    parent.kill(); // the panel server dies hard
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.ok(near(await levelOf(tone.pid), orig), 'put back after the process that started it was killed');
+  } finally {
+    parent.kill();
     tone.kill();
   }
 });
