@@ -58,7 +58,9 @@ export function saveRecovery(entries, file = DUCKING_FILE, log = defaultLog) {
 
 // Runs the referee inside the panel server: ticks it every 50 ms with the
 // current settings, ReadBack's live players and the helper's latest report, and
-// carries out what it decides. The audio helper runs only while ducking is on.
+// carries out what it decides. The audio helper runs while ducking is on, and
+// with ducking off only for a cleanup run (CLEANUP_MS) when lowered apps remain
+// to be put back.
 export function createDuckingDriver({
   readSettings = () => readState().ducking,
   readPlayers = () => livePlayers().map((p) => p.pid),

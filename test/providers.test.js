@@ -45,14 +45,14 @@ const PCM = { body: Buffer.from([1, 2, 3, 4, 5, 6, 7, 8]) };
 const INWORLD_OK = { body: JSON.stringify({ audioContent: Buffer.from('wavbytes').toString('base64') }) };
 const abortError = () => Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
 
-// I11: an empty default voice looks like a chosen voice in the dropdown and
+// An empty default voice looks like a chosen voice in the dropdown and
 // throws inside a detached worker, so a first run is silent with no error shown.
 test('ElevenLabs ships with a real default voice', () => {
   assert.equal(typeof elevenlabs.defaults.voiceId, 'string');
   assert.ok(elevenlabs.defaults.voiceId.length > 0, 'a first-time user must have a voice selected');
 });
 
-// M13: ElevenLabs recommends Flash over Turbo in all use cases.
+// ElevenLabs recommends Flash over Turbo in all use cases.
 test('ElevenLabs defaults to Flash and still offers Turbo', () => {
   assert.equal(elevenlabs.defaults.modelId, 'eleven_flash_v2_5');
   const ids = elevenlabs.models.map((m) => m.id);
@@ -66,7 +66,7 @@ test('the ElevenLabs model fallback matches the declared default', async (t) => 
   assert.equal(calls[0].body.model_id, 'eleven_flash_v2_5');
 });
 
-// M13: the in-provider fallback used to be -max while the declared default was
+// The in-provider fallback used to be -max while the declared default was
 // -mini, so a config block missing modelId silently bought the expensive model.
 test('the Inworld model fallback matches the declared default', async (t) => {
   const calls = queueFetch(t, [INWORLD_OK]);
@@ -75,7 +75,7 @@ test('the Inworld model fallback matches the declared default', async (t) => {
   assert.equal(calls[0].body.modelId, 'inworld-tts-2-flash');
 });
 
-// I12: ElevenLabs documents speed, similarity and speaker boost as unavailable
+// ElevenLabs documents speed, similarity and speaker boost as unavailable
 // on v3. Sending them anyway is noise the model cannot honor.
 test('v3 omits the settings it does not support', async (t) => {
   const calls = queueFetch(t, [PCM]);
@@ -107,7 +107,7 @@ test('non-v3 models still get speed, similarity and speaker boost', async (t) =>
   assert.equal(vs.style, 0.2);
 });
 
-// I13: a bad key fails identically every time. Three round trips just delay the
+// A bad key fails identically every time. Three round trips just delay the
 // error the user needs to read.
 test('a 401 is not retried and reads like an error', async (t) => {
   const calls = queueFetch(t, [
@@ -139,7 +139,7 @@ test('a 500 is retried', async (t) => {
   assert.equal(calls.length, 2);
 });
 
-// I13: ElevenLabs bills on generation, so re-sending after a client-side abort
+// ElevenLabs bills on generation, so re-sending after a client-side abort
 // risks paying twice for audio nobody hears.
 test('a timeout is never repeated', async (t) => {
   const calls = queueFetch(t, [{ throw: abortError() }]);
@@ -157,7 +157,7 @@ test('a network failure is retried', async (t) => {
   assert.equal(calls.length, 2);
 });
 
-// M8: an out-of-range knob reaches the provider as a 400 the user never sees.
+// An out-of-range knob reaches the provider as a 400 the user never sees.
 test('ElevenLabs clamps stability, similarity and style', async (t) => {
   const calls = queueFetch(t, [PCM]);
   await elevenlabs.synthesize(
@@ -191,7 +191,7 @@ test('flagship uses validated deliveryMode, never temperature', async (t) => {
   assert.ok(calls.every(c => !('temperature' in c.body)));
 });
 
-// M8: the panel takes numbers from sliders, but a POST can carry anything.
+// The panel takes numbers from sliders, but a POST can carry anything.
 test('clampKnobs coerces every knob the provider declares', () => {
   const el = clampKnobs('elevenlabs', {
     stability: 5,

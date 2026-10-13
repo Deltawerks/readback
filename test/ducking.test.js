@@ -431,7 +431,8 @@ test('switching off while no helper is connected keeps the leftover and puts it 
   assert.equal(h.audio.vol('mb'), 0.8);
 });
 
-// Review focus 1.
+// A new depth must reach apps already lowered, not only the next dip, and the
+// level kept for crash recovery must follow it.
 test('dragging the depth slider mid-dip glides other audio to the new level', () => {
   const h = harness();
   h.audio.play('mb', 'MusicBee', 0.8);
@@ -443,7 +444,8 @@ test('dragging the depth slider mid-dip glides other audio to the new level', ()
   assert.equal(h.recovery.find((e) => e.name === 'MusicBee').low, 0.24);
 });
 
-// Review focus 2.
+// An app put on the never-lower list mid-dip should not stay quiet until the
+// dip ends.
 test('adding a lowered app to never-lower puts it back at once', () => {
   const h = harness();
   h.audio.play('dc', 'Discord', 0.7);
@@ -560,7 +562,8 @@ test('dragging a player slider by hand mid-sentence wins for that player', () =>
   assert.equal(h.audio.vol('rb'), 0.6);
 });
 
-// Review focus 5.
+// Players are armed by pid, so one finishing must not release another that is
+// still speaking under the mic.
 test('two overlapping ReadBack players are each armed, and one ending leaves the other alone', () => {
   const h = harness();
   h.audio.mic('claude', true);

@@ -53,7 +53,7 @@ test('wire JSON is pure ASCII', () => {
   assert.equal(asciiJson({ k: 'é✓' }), '{"k":"\\u00e9\\u2713"}');
 });
 
-// Review focus 4: noise and half lines on the helper's stdout are ignored.
+// Noise and half lines on the helper's stdout are ignored.
 test('the supervisor starts the helper, ignores noise, and closes stdin on stop', async () => {
   const statuses = [];
   const messages = [];

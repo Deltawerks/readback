@@ -1,5 +1,7 @@
-# ReadBack audio helper (Windows). The panel server's ducking driver starts it
-# while ducking is switched on and talks to it in JSON lines, one per line:
+# ReadBack audio helper (Windows). The panel server's ducking driver starts it,
+# through scripts/audio-helper-relay.js, while ducking is switched on and for a
+# short cleanup run with ducking off when apps a crash left lowered remain to be
+# put back. It talks to the driver in JSON lines, one per line:
 #
 #   stdout  {"t":"ready","v":1} once it is listening, then
 #           {"t":"state","seq":N,"mic":[...],"out":[...]} on any change and at
@@ -12,8 +14,10 @@
 # EOF on stdin means the panel server is gone and is treated exactly like quit:
 # every level this helper lowered goes back (unless the user has moved it
 # since), armed processes go back to full, and it exits. It knows nothing about
-# ReadBack beyond this protocol; docs/2026-10-12-music-ducking-design.md has the
-# reasoning.
+# ReadBack beyond this protocol. Every decision (what to lower, how far, when to
+# put it back, what to restore after a crash) is made by the referee in
+# src/ducking.js, which the panel's driver runs; this helper only applies the
+# levels it is sent and reports the audio sessions Windows lists.
 #
 # Windows PowerShell 5.1 compiles the C# below with the .NET Framework compiler,
 # so it sticks to C# 5: no string interpolation, no ?., no nameof, no out var.

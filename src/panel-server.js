@@ -43,7 +43,8 @@ try {
 const noOpen = process.env.READBACK_NO_OPEN || process.argv.includes('--no-open');
 
 // The ducking referee lives here, in the one ReadBack process that runs all the
-// time. It starts its audio helper only while ducking is switched on.
+// time. It starts its audio helper while ducking is switched on, and briefly
+// with ducking off to put back apps a crash left lowered (see ducking-driver.js).
 const ducking = createDuckingDriver();
 
 // Config fields the panel may write into the active provider's block. This
@@ -523,7 +524,7 @@ server.on('error', async (err) => {
       setTimeout(() => server.listen(PORT, '127.0.0.1'), 1000);
       return;
     }
-    const msg = `panel: port ${PORT} is held by something that does not answer as Readback; set READBACK_PORT or free it`;
+    const msg = `panel: port ${PORT} is held by something that does not answer as ReadBack; set READBACK_PORT or free it`;
     log(msg);
     console.error(msg);
     process.exit(1);

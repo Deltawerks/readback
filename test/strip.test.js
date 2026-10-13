@@ -59,7 +59,7 @@ test('truncateForSpeech cuts long text and adds a tail note', () => {
   assert.ok(out.endsWith('the rest is on screen.'));
 });
 
-// I9: the table-separator rule used to backtrack cubically across overlapping
+// The table-separator rule used to backtrack cubically across overlapping
 // whitespace classes, so 3000 spaces took ten seconds. It runs on every reply
 // in the worker and on /api/say in the panel, before any length cap.
 test('a long whitespace run does not stall the stripper', () => {
@@ -78,7 +78,7 @@ test('table separator rows are still dropped', () => {
   assert.ok(out.includes('Ada'));
 });
 
-// I15: a hard line break inside a paragraph is where the text was wrapped, not
+// A hard line break inside a paragraph is where the text was wrapped, not
 // where the sentence ended. Reading a full stop there also chunks there.
 test('a wrapped paragraph is read as one sentence', () => {
   const md =
@@ -96,7 +96,7 @@ test('blank lines, list items and finished sentences still break', () => {
   assert.equal(stripForSpeech('## Heading\nBody text here'), 'Heading. Body text here');
 });
 
-// I16: the italic rule ate the underscores out of every snake_case identifier,
+// The italic rule ate the underscores out of every snake_case identifier,
 // so "read_state_file" was spoken as "readstatefile".
 test('snake_case identifiers keep their underscores', () => {
   assert.equal(
@@ -110,7 +110,7 @@ test('emphasis still loses its markers', () => {
   assert.equal(stripForSpeech('That is *important* work.'), 'That is important work.');
 });
 
-// M14: the default has to match config's maxChars, or a caller that omits it
+// The default has to match config's maxChars, or a caller that omits it
 // silently cuts at the old 1800.
 test('truncateForSpeech defaults to the configured 12000-char cap', () => {
   const long = 'word '.repeat(1000).trim(); // 4999 chars, well past the old default

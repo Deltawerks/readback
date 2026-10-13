@@ -1,5 +1,5 @@
 param(
-  [string]$Name = "Readback",
+  [string]$Name = "ReadBack",
   [switch]$StartMenu
 )
 
@@ -62,7 +62,7 @@ function New-VbxShortcut($lnkPath) {
   $sc.WorkingDirectory = $projDir
   $sc.WindowStyle = 7
   $sc.IconLocation = $iconLocation
-  $sc.Description = "Open the Readback control panel"
+  $sc.Description = "Open the ReadBack control panel"
   $sc.Save()
 }
 

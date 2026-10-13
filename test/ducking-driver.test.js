@@ -124,7 +124,8 @@ test('switching off sends the put-backs before it closes the helper', () => {
   assert.equal(existsSync(r.file), false, 'nothing left to recover');
 });
 
-// Review focus 3.
+// A settings read that fails for a moment (antivirus, a write in progress) must
+// not count as ducking switched off and bring the music back mid-dip.
 test('a settings file that cannot be read for a moment changes nothing mid-dip', () => {
   const r = rig();
   r.driver.tick();

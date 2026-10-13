@@ -12,9 +12,9 @@ codex-hooks-snippet.json
 codex-mcp-snippet.toml
 assets/readback.ico
 assets/voicebox.ico
-.claude/launch.json
-# Machine-specific Claude Code settings: holds local paths.
-.claude/settings.local.json
+# Claude Code's per-checkout folder (settings, launch configs, worktrees):
+# machine-specific, holds local paths. Nothing in it belongs in the repo.
+.claude/
 # API keys, wherever they land, and anything retired in place rather than deleted.
 secret.json
 *.retired

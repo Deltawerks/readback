@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Readback</title>
+<title>ReadBack</title>
 <style>
   /* Fonts are bundled (latin subset, variable) so the panel loads with zero
      outbound requests and renders identically offline. See fonts/README.md. */
@@ -94,6 +94,7 @@
   .hint { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin: -6px 0 12px 106px; }
   .cost { font-family: var(--body); font-size: 11.5px; color: var(--dim); margin: -12px 0 14px; }
   .cost:empty { display: none; }
+  .cost a { color: var(--blue-2); }
   .switch-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
   .switch-row .lbl2 { font-family: var(--body); font-size: 12px; color: var(--muted); letter-spacing: .3px; }
   .toggle.sm { --w: 48px; --h: 26px; }
@@ -120,7 +121,7 @@
   <div class="card">
     <div class="head">
       <div class="brand">
-        <img class="logo-img" src="logo.png" alt="Readback" />
+        <img class="logo-img" src="logo.png" alt="ReadBack" />
         <div>
           <div class="title"><span class="r">Read</span><span class="b">Back</span></div>
           <div class="subtitle">Voice for Claude &amp; Codex</div>
@@ -369,21 +370,26 @@ function renderModels() {
   drawn.modelId = cfg().modelId;
   renderCost();
 }
-// Published list price per 1,000 characters. ElevenLabs is 10 to 20 times
-// Inworld's mini, which is worth seeing before you pick, not after the bill. A
-// model with no verified rate shows nothing rather than a guess.
-const COST_PER_1K = {
-  inworld: {},
-  elevenlabs: {
-    eleven_flash_v2_5: '$0.05',
-    eleven_turbo_v2_5: '$0.05',
-    eleven_v3: '$0.10',
-    eleven_multilingual_v2: '$0.10',
-  },
+// Both providers bill per character. Rates change, so the panel links each
+// provider's own pricing page rather than quoting a figure that goes stale.
+const PRICING_URL = {
+  inworld: 'https://inworld.ai/pricing',
+  elevenlabs: 'https://elevenlabs.io/pricing/api',
 };
+const MODEL_NOTE = new Map([
+  ['inworld-tts-2-flash', 'Default for ReadBack, the lower-priced TTS-2 model'],
+  ['inworld-tts-2', 'Adds Stable, Balanced and Creative delivery'],
+]);
 function renderCost() {
-  const price = (COST_PER_1K[prov()] || {})[cfg().modelId] || '';
-  $('cost').textContent = prov() === 'inworld' ? (cfg().modelId === 'inworld-tts-2-flash' ? 'Fastest and most cost-effective · default for ReadBack' : 'Flagship quality with three delivery modes') : (price ? 'About ' + price + ' per 1,000 characters spoken.' : '');
+  const box = $('cost');
+  const note = prov() === 'inworld' ? MODEL_NOTE.get(cfg().modelId) : '';
+  box.textContent = (note ? note + ' · ' : '') + 'Billed per character';
+  const url = PRICING_URL[prov()];
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  a.textContent = 'current prices';
+  box.append(' · ', a);
 }
 // A stored value that isn't a finite number (a hand-edited state file, a value
 // left over from an older build) used to print NaN in the readout and leave the
@@ -697,7 +703,7 @@ $('model').addEventListener('change', (e) => {
   renderCost(); renderTuning();
 });
 $('preview').addEventListener('click', () => { const n = voiceName(); say(n ? ('Hi, this is ' + n + '. This is how I sound at these settings.') : 'This is how the selected voice sounds at these settings.'); });
-$('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'Readback is online and ready.'); });
+$('speak').addEventListener('click', () => { const t = $('testText').value.trim(); say(t || 'ReadBack is online and ready.'); });
 $('testText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('speak').click(); });
 $('stop').addEventListener('click', async () => { try { await api('/api/stop', { method: 'POST' }, SLOW_TIMEOUT_MS); toast('Stopped'); } catch (e) {} });
 $('saveKey').addEventListener('click', saveKey);
@@ -722,7 +728,7 @@ setInterval(refreshState, 3000);
     // Same honest failure as a mid-session outage: NOT CONNECTED, with the
     // reason, instead of a toggle the page cannot back up.
     syncError = e.message; renderStatus();
-    toast('Cannot reach the Readback server', true);
+    toast('Cannot reach the ReadBack server', true);
     return;
   }
   await renderAll();
