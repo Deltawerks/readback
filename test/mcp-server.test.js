@@ -123,3 +123,31 @@ test('voice_status describes the free voice without blanks', async () => {
     assert.doesNotMatch(line, /undefined/);
   }, freeVoice({ installed: true }));
 });
+
+// Each assistant has its own voice. The MCP server Codex starts runs with
+// READBACK_SOURCE=codex, and every tool must read and change Codex's profile,
+// never Claude's.
+test("in Codex's MCP server, the voice tools change and report Codex's profile only", async () => {
+  await withServer(async ({ call, settings }) => {
+    for (const [name, args] of [
+      ['set_provider', { provider: 'elevenlabs' }],
+      ['set_voice', { voiceId: 'codex-voice' }],
+      ['set_model', { modelId: 'eleven_v3' }],
+      ['set_speed', { speed: 1.1 }],
+    ]) {
+      const r = await call('tools/call', { name, arguments: args });
+      assert.ok(!r.error && !r.result.isError, `${name}: ${JSON.stringify(r)}`);
+    }
+    const s = settings();
+    assert.equal(s.agents.codex.provider, 'elevenlabs');
+    assert.equal(s.agents.codex.elevenlabs.voiceId, 'codex-voice');
+    assert.equal(s.agents.codex.elevenlabs.modelId, 'eleven_v3');
+    assert.equal(s.agents.codex.elevenlabs.speed, 1.1);
+    // Claude's profile, and the top level that mirrors it, are untouched.
+    assert.equal(s.agents.claude.provider, 'inworld');
+    assert.notEqual(s.agents.claude.elevenlabs.voiceId, 'codex-voice');
+    assert.equal(s.provider, 'inworld');
+    const status = await call('tools/call', { name: 'voice_status', arguments: {} });
+    assert.match(status.result.content[0].text, /^codex voice .* · elevenlabs · codex-voice · eleven_v3 · speed 1\.1 · /);
+  }, { READBACK_SOURCE: 'codex' });
+});
