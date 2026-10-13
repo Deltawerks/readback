@@ -40,6 +40,10 @@ export function createHelperSupervisor({
   let readyAt = null;
   let timer = null;
   let status = 'off';
+  // The last reason logged. A helper that fails the same way on every retry
+  // (a second panel's, turned away by the first) is logged once, not every
+  // 30 s forever; a helper that comes up healthy clears it.
+  let lastWhy = null;
 
   function setStatus(next, detail) {
     if (next === status && !detail) return;
@@ -85,6 +89,7 @@ export function createHelperSupervisor({
       if (!msg || typeof msg !== 'object') return;
       if (msg.t === 'ready') {
         readyAt = now();
+        lastWhy = null;
         setStatus('ready');
       }
       onMessage(msg);
@@ -103,7 +108,8 @@ export function createHelperSupervisor({
       // PowerShell puts the reason on the first line and its error-record
       // boilerplate after it.
       const why = stderr.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || `exit code ${code}`;
-      log(`ducking: audio helper stopped (${why}); restarting`);
+      if (why !== lastWhy) log(`ducking: audio helper stopped (${why}); restarting`);
+      lastWhy = why;
       scheduleRestart(why);
     };
     proc.on('error', (err) => {

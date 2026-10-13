@@ -184,3 +184,28 @@ test('stop cancels a pending restart', async () => {
   assert.equal(spawned, 1);
   assert.equal(sup.status(), 'off');
 });
+
+// With a second panel running, its helper is turned away (exit 4) on every
+// retry. The reason was logged each time, about 2,900 lines a day into a log
+// that is never rotated.
+test('a helper that keeps failing the same way is logged once, not on every retry', async () => {
+  const logs = [];
+  let launches = 0;
+  const sup = createHelperSupervisor({
+    command: process.execPath,
+    args: ['-e', "process.stderr.write('Another ReadBack audio helper is already running in this Windows session.\n'); process.exit(4)"],
+    spawnFn: (...a) => {
+      launches++;
+      return spawn(...a);
+    },
+    log: (m) => logs.push(m),
+    setTimer: (fn) => setTimeout(fn, 10),
+  });
+  sup.start();
+  try {
+    await until(() => launches >= 5);
+  } finally {
+    sup.stop();
+  }
+  assert.equal(logs.filter((l) => /already running/.test(l)).length, 1, logs.join('\n'));
+});
