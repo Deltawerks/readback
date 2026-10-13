@@ -116,6 +116,56 @@ test('restart ends a helper that stopped answering and starts a fresh one', asyn
   await until(() => sup.status() === 'off');
 });
 
+// Every 'ready' used to wipe the failure count, so a helper that started and
+// then died (or hung and was killed) was restarted every second, forever,
+// compiling its C# each time.
+test('a helper that keeps dying soon after starting backs off', async () => {
+  const delays = [];
+  let ready = 0;
+  const sup = createHelperSupervisor({
+    command: process.execPath,
+    args: ['-e', "console.log(JSON.stringify({ t: 'ready', v: 1 })); setTimeout(() => process.exit(3), 50)"],
+    onMessage: (m) => {
+      if (m.t === 'ready') ready++;
+    },
+    setTimer: (fn, ms) => {
+      delays.push(ms);
+      return setTimeout(fn, 10);
+    },
+  });
+  sup.start();
+  try {
+    await until(() => ready >= 4);
+  } finally {
+    sup.stop();
+  }
+  assert.deepEqual(delays.slice(0, 3), [1000, 2000, 5000]);
+});
+
+// PowerShell puts the reason first and its error-record boilerplate last, so
+// the last line ("+ FullyQualifiedErrorId : ...") told nobody anything.
+test('a helper that cannot start says why in its own words', async () => {
+  const details = [];
+  const sup = createHelperSupervisor({
+    command: process.execPath,
+    args: ['-e', [
+      "process.stderr.write('audio-helper.ps1 cannot be loaded because running scripts is disabled on this system.\\r\\n')",
+      "process.stderr.write('    + CategoryInfo          : SecurityError: (:) [], ParentContainsErrorRecordException\\r\\n')",
+      "process.stderr.write('    + FullyQualifiedErrorId : UnauthorizedAccess\\r\\n')",
+      'process.exit(1)',
+    ].join(';')],
+    onStatus: (s, detail) => detail && details.push(detail),
+    setTimer: (fn) => setTimeout(fn, 1000),
+  });
+  sup.start();
+  try {
+    await until(() => details.length > 0);
+  } finally {
+    sup.stop();
+  }
+  assert.match(details[0], /running scripts is disabled/);
+});
+
 test('stop cancels a pending restart', async () => {
   let spawned = 0;
   const sup = createHelperSupervisor({

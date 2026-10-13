@@ -9,8 +9,14 @@ export const HELPER_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper.ps1');
 // helper behind it survives the panel long enough to put levels back. The
 // relay's header explains why the helper cannot simply be spawned directly.
 export const RELAY_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper-relay.js');
+// By full path, so a PATH without System32 cannot make the helper fail with
+// nothing but an exit code.
+const POWERSHELL = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 const HELPER_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', HELPER_SCRIPT];
 const BACKOFF_MS = [1000, 2000, 5000, 15000, 30000];
+// A helper only counts as healthy again once it has stayed up this long, so
+// one that dies right after starting backs off instead of restarting forever.
+const HEALTHY_MS = 60 * 1000;
 
 // Keeps the platform audio helper running while ducking is on: parses its JSON
 // lines (anything else on its stdout is ignored), restarts it with backoff
@@ -18,7 +24,7 @@ const BACKOFF_MS = [1000, 2000, 5000, 15000, 30000];
 // what it lowered and exit.
 export function createHelperSupervisor({
   command = process.execPath,
-  args = [RELAY_SCRIPT, 'powershell.exe', ...HELPER_ARGS],
+  args = [RELAY_SCRIPT, POWERSHELL, ...HELPER_ARGS],
   detached = true,
   onMessage = () => {},
   onStatus = () => {},
@@ -26,10 +32,12 @@ export function createHelperSupervisor({
   spawnFn = spawn,
   setTimer = setTimeout,
   clearTimer = clearTimeout,
+  now = () => Date.now(),
 } = {}) {
   let child = null;
   let wanted = false;
   let failures = 0;
+  let readyAt = null;
   let timer = null;
   let status = 'off';
 
@@ -63,7 +71,7 @@ export function createHelperSupervisor({
     let stderr = '';
     let finished = false;
     proc.stderr?.on('data', (d) => {
-      stderr = (stderr + d).slice(-500);
+      if (stderr.length < 2000) stderr += d; // the reason comes first
     });
     proc.stdin?.on('error', () => {});
     const lines = createInterface({ input: proc.stdout });
@@ -76,7 +84,7 @@ export function createHelperSupervisor({
       }
       if (!msg || typeof msg !== 'object') return;
       if (msg.t === 'ready') {
-        failures = 0;
+        readyAt = now();
         setStatus('ready');
       }
       onMessage(msg);
@@ -86,11 +94,15 @@ export function createHelperSupervisor({
       finished = true;
       lines.close();
       if (child === proc) child = null;
+      if (readyAt !== null && now() - readyAt >= HEALTHY_MS) failures = 0;
+      readyAt = null;
       if (!wanted) {
         setStatus('off');
         return;
       }
-      const why = stderr.trim().split(/\r?\n/).pop() || `exit code ${code}`;
+      // PowerShell puts the reason on the first line and its error-record
+      // boilerplate after it.
+      const why = stderr.split(/\r?\n/).map((l) => l.trim()).find(Boolean) || `exit code ${code}`;
       log(`ducking: audio helper stopped (${why}); restarting`);
       scheduleRestart(why);
     };
@@ -98,7 +110,8 @@ export function createHelperSupervisor({
       log(`ducking: audio helper error: ${err.message}`);
       if (proc.pid === undefined) done(err.message); // it never started at all
     });
-    proc.on('exit', done);
+    // 'close', not 'exit': by then everything it wrote to stderr has arrived.
+    proc.on('close', done);
   }
 
   return {
