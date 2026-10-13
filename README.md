@@ -42,15 +42,18 @@ their ReadBack MCP server reloads.
 
 ## How it works
 
-Three cooperating pieces sharing saved settings and one speech queue:
+A few cooperating processes share the saved settings and one speech queue on
+disk:
 
 | Piece | Role |
 |------|------|
-| **MCP server** | in-chat toggle: `voice_on` / `voice_off` / `set_provider` / `set_voice` / `say` / `list_voices` |
-| **Stop hook** | the actual voice: auto-speaks each reply while enabled |
-| **Control panel** | `127.0.0.1:7717` control panel for provider / voice / model / tuning + live preview |
+| **Stop hooks** | The voice. When a reply finishes, Claude Code runs `hook/stop-hook.js` and Codex runs `hook/codex-stop-hook.js`. Each checks the speech switches, starts a background worker (`hook/worker.js` or `hook/codex-worker.js`) and exits at once, so the turn never waits on speech. The worker takes the reply (Claude's from the session transcript, Codex's from the Stop event), cleans it, synthesizes it a few sentences at a time starting with the first, and plays it in queue order. |
+| **MCP server** | In-chat controls, 11 tools: `voice_on`, `voice_off`, `set_agent_enabled`, `voice_status`, `stop`, `say`, `set_provider`, `set_voice`, `set_model`, `set_speed` and `list_voices`. |
+| **Control panel** | A local page at `127.0.0.1:7717` for provider, voice, model, tuning, keys, live preview and ducking. |
+| **Ducking helper** | Started by the panel when ducking needs it: a detached Node relay (`scripts/audio-helper-relay.js`) runs a hidden PowerShell script (`scripts/audio-helper.ps1`) that compiles a small C# Core Audio helper and sets per-app volume on the panel's instructions. |
 
-The hook and MCP toggle work whether or not the panel is open.
+The hooks and the MCP controls work whether or not the panel is open. Ducking
+needs the panel.
 
 ## Setup (Windows, Node 18+)
 
@@ -205,7 +208,8 @@ off the other or reset your choices. No manual speech-service startup is needed.
 The panel server runs independently of both assistants. The Desktop shortcut
 starts it if needed and opens the settings page; opening the shortcut again
 reuses the running server. Closing the browser tab only closes the view.
-Automatic speech works even when the panel server is not running.
+Automatic speech works even when the panel server is not running; ducking does
+not.
 
 Use the Desktop shortcut for normal use, or start the independent panel directly:
 
