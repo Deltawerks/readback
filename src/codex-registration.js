@@ -1,7 +1,9 @@
 import path from 'node:path';
 
 const shQuote = (s) => "'" + s.replaceAll("'", "'\"'\"'") + "'";
-const psQuote = (s) => "'" + s.replaceAll("'", "''") + "'";
+// PowerShell ends a single-quoted string at any of ' ‘ ’ ‚ ‛, not just the ASCII
+// one, and doubling is the escape for each of them.
+const psQuote = (s) => "'" + s.replace(/['‘’‚‛]/g, '$&$&') + "'";
 
 // Produce configuration only. Never overwrite Codex's config, other hooks,
 // ReadBack's settings, or either provider's key during registration.

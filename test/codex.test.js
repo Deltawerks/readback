@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { spawnSync } from 'node:child_process';
 import { codexReply, stripCodexMetadata, readHookInput, codexTurnEligibility } from '../src/codex.js';
 import { codexRegistration } from '../src/codex-registration.js';
 
@@ -71,6 +72,28 @@ test('Codex registration quotes paths and keeps the hook separate from MCP contr
   assert.ok(script.endsWith("codex-stop-hook.js'"));
   assert.ok(config.mcpToml.includes('[mcp_servers.readback]'));
   assert.ok(!config.mcpToml.includes('enabled = true'));
+});
+
+// PowerShell also treats the typographic quotes ‘ ’ ‚ ‛ as single quotes, so a
+// folder like "O’Brien" ended the quoted path early and left the rest of it to
+// run as bare words. Ask PowerShell's own parser what the hook command holds.
+test('Codex hook command survives every quote character PowerShell recognises', {
+  skip: process.platform !== 'win32',
+}, () => {
+  const root = "C:\\Tools\\O’Brien‘s ‚odd‛ 'voice' tools";
+  const node = 'C:\\Program Files\\nodejs\\node.exe';
+  const config = codexRegistration(root, node);
+  const encoded = config.hooks.hooks.Stop[0].hooks[0].commandWindows.split(' ').at(-1);
+  const script = Buffer.from(encoded, 'base64').toString('utf16le');
+  const r = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    '[Console]::OutputEncoding = [Text.Encoding]::UTF8; ' +
+    '$tokens = [Management.Automation.PSParser]::Tokenize($env:RB_SCRIPT, [ref]$null); ' +
+    'ConvertTo-Json -Compress @($tokens | ForEach-Object { @{ type = [string]$_.Type; content = $_.Content } })'],
+  { encoding: 'utf8', env: { ...process.env, RB_SCRIPT: script }, windowsHide: true });
+  assert.equal(r.status, 0, r.stderr);
+  const tokens = JSON.parse(r.stdout);
+  assert.deepEqual(tokens.map((t) => t.type), ['Operator', 'String', 'String']);
+  assert.deepEqual(tokens.slice(1).map((t) => t.content), [node, config.hook]);
 });
 
 test('speech provenance rejects predictions, subagents, wrong sessions and unmatched turns', async () => {
