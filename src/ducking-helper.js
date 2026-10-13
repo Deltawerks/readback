@@ -12,10 +12,10 @@ export const RELAY_SCRIPT = path.join(ROOT, 'scripts', 'audio-helper-relay.js');
 const HELPER_ARGS = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', HELPER_SCRIPT];
 const BACKOFF_MS = [1000, 2000, 5000, 15000, 30000];
 
-// Keeps the platform audio helper running while ducking is on: parses its JSON
-// lines (anything else on its stdout is ignored), restarts it with backoff
-// when it dies, and on stop closes its stdin, which is its signal to put back
-// what it lowered and exit.
+// Keeps the platform audio helper running while the driver wants it (ducking
+// on, or a cleanup run with ducking off): parses its JSON lines (anything else
+// on its stdout is ignored), restarts it with backoff when it dies, and on stop
+// closes its stdin, which is its signal to put back what it lowered and exit.
 export function createHelperSupervisor({
   command = process.execPath,
   args = [RELAY_SCRIPT, 'powershell.exe', ...HELPER_ARGS],

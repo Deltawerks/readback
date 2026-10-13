@@ -313,12 +313,37 @@ no panel control for it, and a blank or invalid value is ignored.
 
 Switch on **Ducking** in the panel and ReadBack gets out of your way:
 
-- **While ReadBack speaks**, everything else that's playing (music, videos, games) dips to 10% of its level and comes back when the voice is done.
-- **While you dictate** into Claude Desktop or Codex Desktop, the same dip happens. If ReadBack starts talking while your mic is open, it whispers at 15% instead of blasting into your voice-to-text.
+- **While ReadBack speaks**, other apps that are playing (music, videos, games)
+  dip to 10% of their level and come back when the voice is done.
+- **While you dictate** into Claude Desktop or Codex Desktop, the same dip
+  happens. If ReadBack starts talking while your mic is open, it whispers at 15%
+  instead of blasting into your voice-to-text.
 
-It works with any player and needs no setup. ReadBack watches which apps have your microphone open. Windows reports this per app: `claude` is Claude Desktop and `ChatGPT` is Codex Desktop. It lowers other apps through Windows' own per-app volume, the same levels as the Volume Mixer. Move an app's volume yourself during a dip and ReadBack leaves it alone.
+There is nothing to set up per player. Ducking works with apps that play
+through the normal Windows mixer, the ones the Volume Mixer lists; an app that
+takes the device in WASAPI exclusive mode bypasses the mixer and is not lowered.
+ReadBack watches which apps have your microphone open. Windows reports this per
+app: `claude` is Claude Desktop and `ChatGPT` is Codex Desktop. If a dictation
+app keeps the microphone open after you stop talking, other audio stays lowered
+until it closes it. ReadBack lowers other apps through Windows' own per-app
+volume, the same levels as the Volume Mixer. Move an app's volume yourself
+during a dip and ReadBack leaves it alone.
 
-Ducking runs inside the panel server, so keep the panel running (see "Day to day" for starting it at sign-in). If the panel server or the small audio helper it starts ever dies mid-dip, the volume goes back on its own: the helper restores it, or failing that, the next panel start does. The panel's **Restore volume** button does it on demand.
+Ducking runs inside the panel server, so keep the panel running (see "Day to
+day" for starting it at sign-in). Levels go back like this:
+
+- **The panel server exits or dies.** The audio helper sees the panel go away,
+  puts back what it lowered, and exits.
+- **The panel and the helper both die mid-dip** (a crash, a power cut). The
+  lowered apps and their original levels are on record in the cache folder. On
+  its next start the panel runs the helper for up to 30 seconds, even with
+  ducking switched off, and puts back each app on that list that is open and
+  still lowered. An app whose volume you have set since is left alone. Apps that
+  are not open by then stay on the list, for up to a week, until a later panel
+  start finds them, or until they open again while ducking is on. Switching
+  ducking off and pressing **Restore volume** start the same 30-second run
+  whenever apps remain to be put back.
+- **Restore volume** in the panel puts everything back on demand.
 
 The settings cover the dip depth for other audio and for ReadBack, which apps count as dictation, and a "never lower" list (for a call app, say). Ducking is off on a fresh install. Windows only for now.
 

@@ -1,5 +1,7 @@
-# ReadBack audio helper (Windows). The panel server's ducking driver starts it
-# while ducking is switched on and talks to it in JSON lines, one per line:
+# ReadBack audio helper (Windows). The panel server's ducking driver starts it,
+# through scripts/audio-helper-relay.js, while ducking is switched on and for a
+# short cleanup run with ducking off when apps a crash left lowered remain to be
+# put back. It talks to the driver in JSON lines, one per line:
 #
 #   stdout  {"t":"ready","v":1} once it is listening, then
 #           {"t":"state","seq":N,"mic":[...],"out":[...]} on any change and at
