@@ -151,6 +151,7 @@ namespace ReadbackAudio
     public class Session
     {
         public string Key;
+        public string EndpointId;
         public uint Pid;
         public string Name;
         public bool IsMic;
@@ -171,15 +172,16 @@ namespace ReadbackAudio
     {
         const int RENDER = 0, CAPTURE = 1, ACTIVE_DEVICES = 1, CLSCTX_ALL = 0x17;
         const int ACTIVE = 1, EXPIRED = 2;
-        // New sessions arrive through Windows' notification; this rescan is a
-        // backstop for one it missed, and runs at once when a device appears.
-        // Rescanning every second while holding every session open grew the
-        // helper by about 70 MB an hour.
-        const int DISCOVER_MS = 10000;
-        // While nothing is lowered or armed below full, let go of every session
-        // and take them again, so whatever Windows builds up per session between
-        // rescans is handed back.
-        const int RETRACK_MS = 5 * 60 * 1000;
+        // Listing a device's sessions while still holding sessions from that same
+        // device leaks inside Windows' audio client, about 1 KB per held session
+        // per listing, and nothing the helper can release gets it back. Rescanning
+        // every second while holding everything grew the helper by about 60 MB an
+        // hour. Holding sessions of one device while listing another does not
+        // leak (measured). So a device is listed when it appears, and after that
+        // new sessions arrive through Windows' notification only; as a backstop
+        // for a missed one, each device is let go of and listed afresh this often,
+        // while nothing is lowered or held below full.
+        const int RETRACK_MS = 60 * 1000;
         static readonly Guid IidManager2 = new Guid("77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F");
         static readonly Guid ClsidEnumerator = new Guid("BCDE0395-E52F-467C-8E3D-C4579291692E");
         // Tags our own changes in Windows' volume-change notifications.
@@ -312,11 +314,9 @@ namespace ReadbackAudio
             try
             {
                 enumerator = (IMMDeviceEnumerator)Activator.CreateInstance(Type.GetTypeFromCLSID(ClsidEnumerator));
-                RefreshEndpoints();
-                Discover();
+                foreach (Endpoint ep in RefreshEndpoints()) ListSessions(ep);
                 Emit("{\"t\":\"ready\",\"v\":1}");
                 DateTime devicesAt = DateTime.UtcNow;
-                DateTime discoverAt = DateTime.UtcNow;
                 DateTime retrackAt = DateTime.UtcNow;
                 DateTime outAt = DateTime.MinValue;
                 while (!stopping)
@@ -324,18 +324,17 @@ namespace ReadbackAudio
                     bool applied = DrainCommands();
                     DrainCreated();
                     DateTime now = DateTime.UtcNow;
-                    bool newDevice = false;
-                    if ((now - devicesAt).TotalMilliseconds >= 5000) { newDevice = RefreshEndpoints(); devicesAt = now; }
+                    if ((now - devicesAt).TotalMilliseconds >= 5000)
+                    {
+                        // A device that just appeared holds nothing yet: list it now.
+                        foreach (Endpoint ep in RefreshEndpoints()) ListSessions(ep);
+                        devicesAt = now;
+                    }
                     if ((now - retrackAt).TotalMilliseconds >= RETRACK_MS && Idle())
                     {
-                        Retrack();
+                        DrainCreated();
+                        foreach (Endpoint ep in endpoints.Values) Retrack(ep);
                         retrackAt = now;
-                        discoverAt = now;
-                    }
-                    else if (newDevice || (now - discoverAt).TotalMilliseconds >= DISCOVER_MS)
-                    {
-                        Discover();
-                        discoverAt = now;
                     }
                     bool readOut = applied || (now - outAt).TotalMilliseconds >= 100;
                     if (readOut) outAt = now;
@@ -376,10 +375,10 @@ namespace ReadbackAudio
             return any;
         }
 
-        // True when a device appeared, so its existing sessions get scanned now.
-        bool RefreshEndpoints()
+        // Returns the devices that just appeared, so their sessions get listed now.
+        List<Endpoint> RefreshEndpoints()
         {
-            bool added = false;
+            List<Endpoint> added = new List<Endpoint>();
             HashSet<string> seen = new HashSet<string>();
             foreach (int flow in new int[] { RENDER, CAPTURE })
             {
@@ -392,12 +391,22 @@ namespace ReadbackAudio
                     IMMDevice dev;
                     if (col.Item(i, out dev) != 0 || dev == null) continue;
                     string id;
-                    if (dev.GetId(out id) != 0 || id == null) continue;
-                    seen.Add(id);
-                    if (endpoints.ContainsKey(id)) continue;
-                    Guid iid = IidManager2;
-                    object o;
-                    if (dev.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o) != 0 || o == null) continue;
+                    object o = null;
+                    try
+                    {
+                        if (dev.GetId(out id) != 0 || id == null) continue;
+                        seen.Add(id);
+                        if (endpoints.ContainsKey(id)) continue;
+                        Guid iid = IidManager2;
+                        if (dev.Activate(ref iid, CLSCTX_ALL, IntPtr.Zero, out o) != 0 || o == null) continue;
+                    }
+                    finally
+                    {
+                        // This check runs every few seconds: hand each device back
+                        // now rather than leaving it to the finalizer. The session
+                        // manager activated from it is a separate object and stays.
+                        Marshal.ReleaseComObject(dev);
+                    }
                     Endpoint ep = new Endpoint();
                     ep.Id = id;
                     ep.IsMic = flow == CAPTURE;
@@ -407,7 +416,7 @@ namespace ReadbackAudio
                         // Take an enumerator first, then listen for new sessions so
                         // later enumerations stay current.
                         IAudioSessionEnumerator warm;
-                        ep.Manager.GetSessionEnumerator(out warm);
+                        if (ep.Manager.GetSessionEnumerator(out warm) == 0 && warm != null) Marshal.ReleaseComObject(warm);
                         SessionSink sink = new SessionSink();
                         sink.Ep = ep;
                         sink.Owner = this;
@@ -418,8 +427,9 @@ namespace ReadbackAudio
                         Log("no new-session events on a device: " + e.Message);
                     }
                     endpoints[id] = ep;
-                    added = true;
+                    added.Add(ep);
                 }
+                Marshal.ReleaseComObject(col);
             }
             List<string> gone = new List<string>();
             foreach (string id in endpoints.Keys) if (!seen.Contains(id)) gone.Add(id);
@@ -427,26 +437,25 @@ namespace ReadbackAudio
             return added;
         }
 
-        void Discover()
+        // Lists one device's sessions. Only ever called while none of that
+        // device's sessions are held (see RETRACK_MS).
+        void ListSessions(Endpoint ep)
         {
-            foreach (Endpoint ep in endpoints.Values)
+            IAudioSessionEnumerator list;
+            if (ep.Manager.GetSessionEnumerator(out list) != 0 || list == null) return;
+            try
             {
-                IAudioSessionEnumerator list;
-                if (ep.Manager.GetSessionEnumerator(out list) != 0 || list == null) continue;
-                try
+                int count;
+                list.GetCount(out count);
+                for (int i = 0; i < count; i++)
                 {
-                    int count;
-                    list.GetCount(out count);
-                    for (int i = 0; i < count; i++)
-                    {
-                        object so;
-                        if (list.GetSession(i, out so) == 0 && so != null) Keep(ep, so);
-                    }
+                    object so;
+                    if (list.GetSession(i, out so) == 0 && so != null) Keep(ep, so);
                 }
-                finally
-                {
-                    Marshal.ReleaseComObject(list);
-                }
+            }
+            finally
+            {
+                Marshal.ReleaseComObject(list);
             }
         }
 
@@ -456,10 +465,8 @@ namespace ReadbackAudio
             while (created.TryDequeue(out item)) Keep(item.Key, item.Value);
         }
 
-        // Every rescan hands back a reference to each session again. One that is
-        // not kept (already tracked, expired, unreadable) is released at once:
-        // for a session already held this only balances the count on the same
-        // wrapper, and anything else would sit waiting for the finalizer.
+        // A session reference that is not kept (already tracked, expired,
+        // unreadable) is released at once rather than left to the finalizer.
         void Keep(Endpoint ep, object so)
         {
             bool kept = false;
@@ -473,7 +480,7 @@ namespace ReadbackAudio
         }
 
         // Nothing lowered and no player held below full: nothing would be lost
-        // by letting go of every session for a moment.
+        // by letting go of a device's sessions for a moment.
         bool Idle()
         {
             if (remembered.Count > 0 || !commands.IsEmpty) return false;
@@ -481,18 +488,22 @@ namespace ReadbackAudio
             return true;
         }
 
-        void Retrack()
+        // Let go of one device's sessions, then list that device afresh.
+        void Retrack(Endpoint ep)
         {
-            DrainCreated();
-            foreach (Session x in sessions.Values)
+            List<string> mine = new List<string>();
+            foreach (Session x in sessions.Values) if (x.EndpointId == ep.Id) mine.Add(x.Key);
+            foreach (string key in mine)
             {
+                Session x = sessions[key];
+                sessions.Remove(key);
                 try { if (x.Control != null) Marshal.FinalReleaseComObject(x.Control); }
                 catch { }
             }
-            sessions.Clear();
-            expired.Clear();
-            names.Clear();
-            Discover();
+            // Session keys start with their device's id; forget that device's
+            // expired ones too, so the set cannot grow without bound.
+            expired.RemoveWhere(k => k.StartsWith(ep.Id, StringComparison.OrdinalIgnoreCase));
+            ListSessions(ep);
         }
 
         bool Track(Endpoint ep, object so)
@@ -506,6 +517,7 @@ namespace ReadbackAudio
             control.GetProcessId(out pid);
             Session x = new Session();
             x.Key = key;
+            x.EndpointId = ep.Id;
             x.Pid = pid;
             x.Name = NameOf(pid);
             x.IsMic = ep.IsMic;
