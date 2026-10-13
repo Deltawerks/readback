@@ -13,6 +13,13 @@ import { log as defaultLog } from './log.js';
 const CLEANUP_MS = 30 * 1000;
 // The helper reports at least every 2 s; this much silence means it is hung.
 const STALE_MS = 6 * 1000;
+// A report older than this may come from a helper that has hung. The referee
+// is handed nothing until a fresh one arrives, so it sends nothing into a
+// pipe that nobody may be reading.
+const FRESH_MS = 3 * 1000;
+// Ticks come every 50 ms. A gap this long is this process's own pause (sleep,
+// a blocked event loop), not the helper's silence.
+const PAUSE_MS = 2 * 1000;
 
 // Apps we lowered and their original levels, kept in the cache dir (never with
 // settings), so a power cut mid-dip can be undone on the next panel start.
@@ -74,6 +81,7 @@ export function createDuckingDriver({
   let recoveryCount = leftovers.length;
   let cleanupUntil = clock() + CLEANUP_MS;
   let lastReportAt = -Infinity;
+  let lastTickAt = null;
   let wasOn = false;
   const cleaning = (now) => recoveryCount > 0 && now < cleanupUntil;
 
@@ -116,8 +124,17 @@ export function createDuckingDriver({
     Object.assign(status, out.status);
   }
 
+  const freshHelper = (now) => (helperState && now - lastReportAt <= FRESH_MS ? helperState : null);
+
   function tick() {
     const now = clock();
+    // After a pause of our own, or a clock set back, start the helper's count
+    // again and wait for a report taken since: the last one may be long stale.
+    if (lastTickAt !== null && (now - lastTickAt > PAUSE_MS || now < lastTickAt)) {
+      lastReportAt = now;
+      helperState = null;
+    }
+    lastTickAt = now;
     if (now - settingsAt >= 500) {
       settingsAt = now;
       try {
@@ -142,12 +159,17 @@ export function createDuckingDriver({
     if (supervisor && status.helper === 'ready' && now - lastReportAt > STALE_MS) {
       log('ducking: the audio helper stopped reporting; restarting it');
       lastReportAt = now;
+      helperState = null;
       supervisor.restart();
     }
-    apply(referee.tick({ now, settings, readbackPids: pids, helper: helperState }));
+    apply(referee.tick({ now, settings, readbackPids: pids, helper: freshHelper(now) }));
     // Off with nothing left to clean up: the put-backs above are already queued
     // on the helper's stdin, ahead of the EOF that stop() sends.
-    if (!on && !cleaning(now)) supervisor?.stop();
+    // stop() also cancels a restart that is waiting out its backoff.
+    if (!on && !cleaning(now)) {
+      helperState = null;
+      supervisor?.stop();
+    }
   }
 
   return {
@@ -170,7 +192,7 @@ export function createDuckingDriver({
       settingsAt = -Infinity;
     },
     restoreNow() {
-      const out = referee.restoreAll(helperState);
+      const out = referee.restoreAll(freshHelper(clock()));
       apply(out);
       // Whatever could not be put back yet gets a cleanup run, ducking on or off.
       cleanupUntil = clock() + CLEANUP_MS;

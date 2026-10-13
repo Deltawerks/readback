@@ -198,6 +198,49 @@ test('with ducking off, a leftover from a crash is still put back by a short cle
   assert.equal(r.events.at(-1), 'stop', 'and stops it once a report shows nothing is left');
 });
 
+// A hung helper keeps its last report on file. Fading the dip back against that
+// report sent every put-back into a pipe nobody was reading.
+test('a helper that has gone quiet is sent nothing, and its replacement finishes the job', () => {
+  const r = rig();
+  r.driver.tick();
+  r.report([MB]);
+  r.players = [7];
+  r.run(400);
+  r.run(3200); // no report for over three seconds: the helper has hung
+  const before = r.events.length;
+  r.players = []; // ReadBack finishes while it is hung
+  r.run(2000);
+  assert.ok(!r.events.slice(before).some((e) => e && e.c === 'set'), 'nothing is sent into a hung helper');
+  r.run(1000);
+  assert.ok(r.events.includes('restart'));
+  r.report([{ ...MB, vol: 0.08 }]); // the new helper: Windows kept the lowered level
+  r.run(100);
+  assert.ok(r.sets().some((c) => c.key === 'mb' && c.vol === 0.8), 'the replacement puts it back');
+});
+
+// Sleep, or a Stop that held the panel's event loop for seconds, looks like
+// helper silence to a wall clock, and a healthy helper was killed for it.
+test("a pause of the panel's own does not get a healthy helper restarted", () => {
+  const r = rig();
+  r.driver.tick();
+  r.report([MB]);
+  r.run(100);
+  r.now += 60_000; // the machine slept for a minute
+  r.driver.tick();
+  assert.ok(!r.events.includes('restart'));
+});
+
+test('a clock set back does not switch the watchdog off', () => {
+  const r = rig();
+  r.driver.tick();
+  r.report([MB]);
+  r.run(100);
+  r.now -= 60_000;
+  r.driver.tick();
+  r.run(7000); // and the helper never reports again
+  assert.ok(r.events.includes('restart'));
+});
+
 test('a helper that stops reporting is restarted', () => {
   const r = rig();
   r.driver.tick();
