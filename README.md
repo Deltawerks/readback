@@ -49,7 +49,7 @@ disk:
 
 | Piece | Role |
 |------|------|
-| **Stop hooks** | The voice. When a reply finishes, Claude Code runs `hook/stop-hook.js` and Codex runs `hook/codex-stop-hook.js`. Each checks the speech switches, starts a background worker (`hook/worker.js` or `hook/codex-worker.js`) and exits at once, so the turn never waits on speech. The worker takes the reply (Claude's from the session transcript, Codex's from the Stop event), cleans it, synthesizes it a few sentences at a time starting with the first, and plays it in queue order. |
+| **Stop hooks** | The voice. When a reply finishes, Claude Code runs `hook/stop-hook.js` and Codex runs `hook/codex-stop-hook.js`. Each checks the speech switches, starts a background worker (`hook/worker.js` or `hook/codex-worker.js`) and exits at once, so the turn never waits on speech. The worker takes the reply from the Stop event (`last_assistant_message`; older Claude Code versions that lack it fall back to the session transcript), cleans it, synthesizes it a few sentences at a time starting with the first, and plays it in queue order. |
 | **MCP server** | In-chat controls, 11 tools: `voice_on`, `voice_off`, `set_agent_enabled`, `voice_status`, `stop`, `say`, `set_provider`, `set_voice`, `set_model`, `set_speed` and `list_voices`. |
 | **Control panel** | A local page at `127.0.0.1:7717` for provider, voice, model, tuning, keys, live preview and ducking. |
 | **Ducking helper** | Started by the panel when ducking needs it: a detached Node relay (`scripts/audio-helper-relay.js`) runs a hidden PowerShell script (`scripts/audio-helper.ps1`) that compiles a small C# Core Audio helper and sets per-app volume on the panel's instructions. |

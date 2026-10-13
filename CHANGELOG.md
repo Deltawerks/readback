@@ -15,7 +15,7 @@ A patch release that comes out of a review of the whole project by five independ
 - **Synthesis pacing.** Synthesis stays about 30 seconds ahead of playback instead of buying the whole reply at once, so a stop or voice-off part way through a long reply saves the rest of the bill.
 - **A player that quits early.** If the player quits early (for example, a script policy blocks PowerShell), synthesis stops and the log says so. Before, the whole reply was paid for and logged as spoken.
 - **Long queues.** A reply waiting behind more than ten minutes of speech no longer loses its place and starts on top of another reply.
-- **After sleep.** A player whose marker was swept after a sleep writes it back, so the next reply waits for it and Stop still finds it.
+- **After sleep.** A player whose marker was swept after a sleep or a stall writes it back after the sentence it is playing, so later replies wait for it and Stop still finds it. A reply can still start during the rest of that sentence.
 - **`READBACK_MAX_CHARS`.** It now caps every reply, not only a new install's default. Blank values for it or for `READBACK_PORT` are ignored instead of being read as 0.
 - **Accented profile folders.** Codex replies are now spoken for users whose Windows profile folder has accented characters in its name. The worker launcher used to garble non-ASCII paths.
 - **Blank lines.** Text cleanup no longer slows down on replies padded with thousands of blank lines.
