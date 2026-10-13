@@ -4,6 +4,57 @@ Dates are the git tag date for tagged versions. Versions that were never
 tagged (0.1.0 to 0.3.0, and the 0.6 line, which shipped inside 0.7.0) are
 dated from the commit history; 0.1.0 predates it.
 
+## 0.7.1 (2026-10-12)
+
+A patch release that comes out of a review of the whole project by five independent reviewers. There are no new features. Everyone on 0.7.0 should upgrade.
+
+### Fixed: speech
+
+- **Sentence splitting.** Sentences no longer split at periods inside file names, version numbers, decimals or abbreviations (`src/state.js`, `0.7.0`, `2.5`, `e.g.`). The first thing heard from a coding reply used to be "I updated src/state."
+- **Where Claude replies come from.** They are now taken from the Stop hook's `last_assistant_message`, as Claude Code's hook documentation recommends for read-aloud hooks. They no longer come from polling the transcript for up to six seconds. Older Claude Code versions still use the transcript.
+- **Synthesis pacing.** Synthesis stays about 30 seconds ahead of playback instead of buying the whole reply at once, so a stop or voice-off part way through a long reply saves the rest of the bill.
+- **A player that quits early.** If the player quits early (for example, a script policy blocks PowerShell), synthesis stops and the log says so. Before, the whole reply was paid for and logged as spoken.
+- **Long queues.** A reply waiting behind more than ten minutes of speech no longer loses its place and starts on top of another reply.
+- **After sleep.** A player whose marker was swept after a sleep writes it back, so the next reply waits for it and Stop still finds it.
+- **`READBACK_MAX_CHARS`.** It now caps every reply, not only a new install's default. Blank values for it or for `READBACK_PORT` are ignored instead of being read as 0.
+- **Accented profile folders.** Codex replies are now spoken for users whose Windows profile folder has accented characters in its name. The worker launcher used to garble non-ASCII paths.
+- **Blank lines.** Text cleanup no longer slows down on replies padded with thousands of blank lines.
+
+### Fixed: ducking
+
+- **Restore volume mid-dip.** Pressing it (or switching ducking off and on) while ReadBack was speaking could make the lowered level an app's permanent original. Every put-back is now tracked until the audio helper confirms it. Restore holds everything at full until the speech or dictation in progress ends.
+- **Hung helper.** A put-back sent to a helper that had hung was lost when the helper was replaced. It is now kept and sent to the replacement, and nothing is sent to a helper whose reports have stopped.
+- **Leftovers.** Leftover levels now match the same app on the same audio device, so an app that switched devices mid-dip is put back correctly on both. Leftovers saved by 0.7.0 still match by app name.
+- **Memory.** The audio helper's memory stays flat. It used to grow by about 60 MB an hour, because Windows leaks memory when a device's sessions are listed while sessions from that same device are still held, and the helper did that every second. It no longer does.
+- **One helper.** Only one audio helper runs per Windows session. A second panel's helper refuses to start instead of fighting the first.
+- **Restarts.** A healthy helper is no longer restarted after sleep and resume. A helper that keeps failing backs off and reports PowerShell's own error message.
+
+### Fixed: panel, setup and security
+
+- **Settings lock.** It no longer gives up under contention on Windows. When the lock file was still being deleted, it wrote without the lock, which could lose concurrent settings changes.
+- **API keys.** A key saved in the panel is no longer overridden for automatic speech by an old key in `.env`.
+- **Panel errors.** The panel shows a provider's own error message (missing key, rejected key, no credit) instead of "internal error". It no longer crashes when it cannot open a browser.
+- **Launcher.** `scripts/launch-panel.ps1` (the Desktop shortcut and Startup entry) uses the configured port and passes its environment on to the panel.
+- **Registration.** `npm run register` writes Node's full path, so the hook works when Claude Desktop does not share the terminal's PATH.
+- **Codex hook and worker:**
+  - The hook command is quoted correctly for paths with typographic apostrophes.
+  - The worker only accepts its own input files.
+  - Orphaned reply files are cleaned up.
+  - The log says why a reply failed.
+- **MCP server.** It reports its real version and cleans voice and model ids the way the panel does.
+- **Stop's backstop sweep.** It now works when a folder name contains brackets.
+- **Dependencies.** `@modelcontextprotocol/sdk` is updated to 1.32.1, and `npm audit` reports no vulnerabilities.
+
+### Changed
+
+- `npm test` no longer touches real audio. The Windows audio integration tests run with `npm run test:audio`.
+- Node 20 or newer is required.
+- The README is corrected throughout: Security, Ducking, How it works, storage and upgrade notes.
+
+### Upgrading
+
+After `git pull`, run `npm install`, because the MCP SDK version changed. Then restart the panel and any open Claude Code or Codex sessions so their ReadBack MCP server reloads. Settings, keys and profiles carry over.
+
 ## 0.7.0 (2026-10-12)
 
 The first release after 0.5.2. It adds music ducking and includes the
