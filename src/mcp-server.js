@@ -22,11 +22,12 @@ const server = new McpServer({ name: 'readback', version });
 
 function summarize(st) {
   const c = activeConfig(st);
-  const tune =
-    st.provider === 'inworld'
-      ? `speed ${c.speed}${c.modelId === 'inworld-tts-2' ? ' · delivery ' + c.deliveryMode : ''}`
-      : `speed ${c.speed} · stability ${c.stability} · style ${c.style}`;
-  return `${SOURCE} voice ${st.enabled ? 'ON' : 'off'} (master ${st.masterEnabled ? 'on' : 'off'}, agent ${st.agentEnabled ? 'on' : 'off'}) · ${st.provider} · ${c.voiceId || '(no voice)'} · ${c.modelId} · ${tune}`;
+  let tune = `speed ${c.speed}`;
+  if (st.provider === 'inworld' && c.modelId === 'inworld-tts-2') tune += ` · delivery ${c.deliveryMode}`;
+  if (st.provider === 'elevenlabs') tune += ` · stability ${c.stability} · style ${c.style}`;
+  // The free voice has one model, so there is none to name.
+  const model = getProvider(st.provider).models.length ? ` · ${c.modelId}` : '';
+  return `${SOURCE} voice ${st.enabled ? 'ON' : 'off'} (master ${st.masterEnabled ? 'on' : 'off'}, agent ${st.agentEnabled ? 'on' : 'off'}) · ${st.provider} · ${c.voiceId || '(no voice)'}${model} · ${tune}`;
 }
 
 const text = (t) => ({ content: [{ type: 'text', text: t }] });
@@ -147,7 +148,7 @@ server.registerTool(
   {
     title: 'Set provider',
     description: 'Switch the TTS provider. Each provider has its own voice, model, and key.',
-    inputSchema: { provider: z.enum(['inworld', 'elevenlabs']) },
+    inputSchema: { provider: z.enum(PROVIDER_IDS) },
   },
   async ({ provider }) => {
     if (!PROVIDER_IDS.includes(provider)) return fail(`unknown provider: ${provider}`);

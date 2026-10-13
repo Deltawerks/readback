@@ -18,7 +18,8 @@
     "register:codex": "node scripts/register-codex.js",
     "shortcut": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-shortcut.ps1",
     "test": "node --test",
-    "test:audio": "node scripts/test-audio.js"
+    "test:audio": "node scripts/test-audio.js",
+    "add-free-voice": "node scripts/add-free-voice.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.1",

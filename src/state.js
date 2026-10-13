@@ -304,8 +304,7 @@ export function normalizeDucking(saved) {
 // legacy flat state (voiceId/speed/expression at top level) into the inworld block.
 function normalize(parsed) {
   const s = { ...DEFAULTS, ...parsed };
-  s.inworld = { ...DEFAULTS.inworld, ...(parsed.inworld || {}) };
-  s.elevenlabs = { ...DEFAULTS.elevenlabs, ...(parsed.elevenlabs || {}) };
+  for (const id of PROVIDER_IDS) s[id] = { ...DEFAULTS[id], ...(parsed[id] || {}) };
 
   if (!parsed.inworld && (parsed.voiceId || parsed.speed != null || parsed.expression != null)) {
     s.inworld = {
@@ -342,8 +341,8 @@ function normalize(parsed) {
     return [agent, {
       enabled: p.enabled === undefined ? true : p.enabled === true,
       provider: PROVIDER_IDS.includes(p.provider) ? p.provider : s.provider,
+      ...Object.fromEntries(PROVIDER_IDS.map((id) => [id, { ...s[id], ...(p[id] || {}) }])),
       inworld: migrateConfig({ ...s.inworld, ...(p.inworld || {}) }),
-      elevenlabs: { ...s.elevenlabs, ...(p.elevenlabs || {}) },
     }];
   }));
   s.ducking = normalizeDucking(parsed.ducking);

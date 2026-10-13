@@ -1,0 +1,10 @@
+{
+  "name": "readback-free-voice",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ReadBack's optional free voice: Kokoro, which runs on this PC. Installed by `npm run add-free-voice` in the ReadBack folder. Nothing else in ReadBack uses this folder.",
+  "license": "MIT",
+  "dependencies": {
+    "kokoro-js": "1.2.1"
+  }
+}

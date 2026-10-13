@@ -177,7 +177,10 @@ function readSecret() {
 }
 
 // Resolution order for a provider's key: real env var > panel-saved key > .env.
+// A provider that needs no key (the free voice) gets none, rather than falling
+// through to Inworld's like an unknown name would.
 export function getApiKey(provider = 'inworld') {
+  if (PROVIDERS[provider] && PROVIDERS[provider].needsKey === false) return '';
   provider = normProvider(provider);
   const real = REAL_ENV_KEYS[provider];
   if (real && real.trim()) return real.trim();
@@ -236,6 +239,6 @@ export const DEFAULTS = {
   lastPid: null,
   lastSpokenId: null,
   lastSpokenBy: null,
-  inworld: { ...PROVIDERS.inworld.defaults },
-  elevenlabs: { ...PROVIDERS.elevenlabs.defaults },
+  // One config block per provider: inworld, elevenlabs, kokoro.
+  ...Object.fromEntries(Object.entries(PROVIDERS).map(([id, p]) => [id, { ...p.defaults }])),
 };

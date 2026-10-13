@@ -231,3 +231,22 @@ test('clampKnobs only touches what the patch carries', () => {
   // An unknown provider resolves the same way getProvider does.
   assert.deepEqual(clampKnobs('nope', { deliveryMode: 'bad' }), { deliveryMode: 'BALANCED' });
 });
+
+test('the free voice is registered, and it alone needs no key', async () => {
+  const { PROVIDER_IDS, providerMeta } = await import('../src/providers/index.js');
+  assert.deepEqual(PROVIDER_IDS, ['inworld', 'elevenlabs', 'kokoro']);
+  const meta = providerMeta();
+  assert.equal(meta.kokoro.label, 'Free (Kokoro)');
+  assert.equal(meta.kokoro.needsKey, false);
+  assert.equal(meta.inworld.needsKey, true);
+  assert.equal(meta.elevenlabs.needsKey, true);
+  // The panel reads whether it is downloaded, and how fast this PC made it.
+  assert.equal(typeof meta.kokoro.status.installed, 'boolean');
+  assert.equal(meta.inworld.status, undefined);
+});
+
+test('the free voice keeps its speed between 0.5x and 2x', () => {
+  assert.equal(clampKnobs('kokoro', { speed: 5 }).speed, 2);
+  assert.equal(clampKnobs('kokoro', { speed: 0.1 }).speed, 0.5);
+  assert.equal(clampKnobs('kokoro', { speed: 'fast' }).speed, 1);
+});

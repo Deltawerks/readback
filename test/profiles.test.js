@@ -68,3 +68,15 @@ test('Codex source mute prevents automatic speech even with master enabled', asy
   const result=await speakCodexReply({hook_event_name:'Stop',session_id:'muted',turn_id:'1',last_assistant_message:'Should stay silent.'},()=>assert.fail('muted source invoked provider'));
   assert.equal(result.skipped,'voice off'); assert.equal(readAgentState('claude').enabled,true);
 });
+
+test('each agent can use the free voice with its own voice', () => {
+  seed();
+  assert.deepEqual(readState().kokoro, { voiceId: 'af_heart', speed: 1 });
+  writeAgentState('codex', { provider: 'kokoro', kokoro: { voiceId: 'bm_george' } });
+  const codex = readAgentState('codex');
+  const claude = readAgentState('claude');
+  assert.equal(codex.provider, 'kokoro');
+  assert.equal(codex.kokoro.voiceId, 'bm_george');
+  assert.equal(claude.provider, 'inworld');
+  assert.equal(claude.kokoro.voiceId, 'af_heart');
+});

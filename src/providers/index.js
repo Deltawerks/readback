@@ -1,19 +1,28 @@
 import * as inworld from './inworld.js';
 import * as elevenlabs from './elevenlabs.js';
+import * as kokoro from './kokoro.js';
 
-export const PROVIDERS = { inworld, elevenlabs };
+export const PROVIDERS = { inworld, elevenlabs, kokoro };
 export const PROVIDER_IDS = Object.keys(PROVIDERS);
 
 export function getProvider(name) {
   return PROVIDERS[name] || inworld;
 }
 
-// Serializable metadata for the panel (labels, models, tuning knobs). No functions.
+// Serializable metadata for the panel (labels, models, tuning knobs, whether a
+// key is needed, and a provider's own status if it has one). No functions.
 export function providerMeta() {
   return Object.fromEntries(
     Object.entries(PROVIDERS).map(([id, p]) => [
       id,
-      { label: p.label, models: p.models, knobs: p.knobs, defaults: p.defaults },
+      {
+        label: p.label,
+        models: p.models,
+        knobs: p.knobs,
+        defaults: p.defaults,
+        needsKey: p.needsKey !== false,
+        ...(p.status ? { status: p.status() } : {}),
+      },
     ])
   );
 }

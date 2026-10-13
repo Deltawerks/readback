@@ -57,3 +57,21 @@ test('set_voice and set_model store ids cleaned the way the panel cleans them', 
     assert.equal(saved.modelId, 'inworld-tts-2');
   });
 });
+
+test('set_provider can switch to the free voice', async () => {
+  await withServer(async ({ call, settings }) => {
+    const r = await call('tools/call', { name: 'set_provider', arguments: { provider: 'kokoro' } });
+    assert.ok(!r.error && !r.result.isError, JSON.stringify(r));
+    assert.equal(settings().agents.claude.provider, 'kokoro');
+  });
+});
+
+test('voice_status describes the free voice without blanks', async () => {
+  await withServer(async ({ call }) => {
+    await call('tools/call', { name: 'set_provider', arguments: { provider: 'kokoro' } });
+    const r = await call('tools/call', { name: 'voice_status', arguments: {} });
+    const line = r.result.content[0].text;
+    assert.match(line, / · kokoro · af_heart · speed 1$/);
+    assert.doesNotMatch(line, /undefined/);
+  });
+});

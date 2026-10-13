@@ -66,3 +66,20 @@ test('a real environment variable still wins everywhere', () => {
     assert.deepEqual(run('env-key'), { parent: 'env-key', child: 'env-key' });
   });
 });
+
+// The free voice runs on this PC and has no key. Asking for "its" key used to
+// fall through to Inworld's, so the user's paid key was handed to code that
+// has no use for it.
+test('the free voice is never handed a key', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'readback-keys-'));
+  try {
+    const r = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const { getApiKey } = await import(${JSON.stringify(new URL('../src/config.js', import.meta.url).href)});
+      process.stdout.write(JSON.stringify({ inworld: getApiKey('inworld'), kokoro: getApiKey('kokoro') }));
+    `], { encoding: 'utf8', env: { ...process.env, READBACK_STATE_DIR: dir, READBACK_CACHE_DIR: dir, INWORLD_API_KEY: 'real-inworld-key' } });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(JSON.parse(r.stdout), { inworld: 'real-inworld-key', kokoro: '' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
