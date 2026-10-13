@@ -9,7 +9,7 @@
 // whitespace and then a capital, a digit or an opening quote follow, or at the
 // end of the text. A bare period is not enough: src/state.js, 0.7.0, 2.5 and
 // e.g. were each cut in two.
-const SENTENCE = /\S[\s\S]*?[.!?…]+["'”’)\]]*(?=\s+["'“‘(\[]*[\p{Lu}\p{N}]|\s*$)|\S[\s\S]*$/gu;
+const SENTENCE = /\S[\s\S]*?[.!?…]+["'\u201D\u2019)\]]*(?=\s+["'\u201C\u2018(\[]*[\p{Lu}\p{N}]|\s*$)|\S[\s\S]*$/gu;
 
 export function chunkForSpeech(text, { maxChunk = 300 } = {}) {
   const t = (text || '').trim();
