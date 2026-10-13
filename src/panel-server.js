@@ -17,7 +17,8 @@ import {
   storedApiKey,
   envOverridesKey,
 } from './config.js';
-import { readState, readAgentState, writeAgentState, AGENTS, writeState, updateProviderConfig, StateUnreadableError } from './state.js';
+import { readState, readAgentState, writeAgentState, AGENTS, writeState, updateProviderConfig, writeDuckingState, StateUnreadableError } from './state.js';
+import { createDuckingDriver } from './ducking-driver.js';
 import { listVoices, stripForSpeech, truncateForSpeech } from './tts.js';
 import { stopPlayback } from './audio.js';
 import { flushQueue } from './queue.js';
@@ -40,6 +41,10 @@ try {
 }
 
 const noOpen = process.env.READBACK_NO_OPEN || process.argv.includes('--no-open');
+
+// The ducking referee lives here, in the one ReadBack process that runs all the
+// time. It starts its audio helper only while ducking is switched on.
+const ducking = createDuckingDriver();
 
 // Config fields the panel may write into the active provider's block. This
 // only whitelists which fields may be set; the coercion (numbers into each
@@ -70,7 +75,7 @@ function keyStatus() {
 // last-4 hint is the local panel's business, not a dashboard's.
 function stateResponse(st, remote = false) {
   const base = { ...(st || readState()), providers: providerMeta() };
-  return remote ? base : { ...base, keys: keyStatus() };
+  return remote ? base : { ...base, keys: keyStatus(), duckingStatus: ducking.status() };
 }
 
 function send(res, status, body, type = 'application/json') {
@@ -422,6 +427,37 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
 
+    // Local only: REMOTE_ROUTES stays /api/state. Types are checked here; the
+    // values themselves are cleaned (clamped, de-duplicated) by writeDuckingState.
+    if (pathname === '/api/ducking' && req.method === 'POST') {
+      const body = await readBody(req);
+      const patch = {};
+      for (const k of ['enabled', 'onSpeech', 'onMic', 'voiceUnderMic']) {
+        if (body[k] === undefined) continue;
+        if (typeof body[k] !== 'boolean') return send(res, 400, { error: `${k} must be true or false` });
+        patch[k] = body[k];
+      }
+      for (const k of ['depth', 'voiceDepth']) {
+        if (body[k] === undefined) continue;
+        if (typeof body[k] !== 'number' || !Number.isFinite(body[k])) return send(res, 400, { error: `${k} must be a number` });
+        patch[k] = body[k];
+      }
+      for (const k of ['micApps', 'neverDuck']) {
+        if (body[k] === undefined) continue;
+        if (!Array.isArray(body[k]) || body[k].some((x) => typeof x !== 'string')) {
+          return send(res, 400, { error: `${k} must be a list of app names` });
+        }
+        patch[k] = body[k];
+      }
+      const st = writeDuckingState(patch);
+      ducking.settingsChanged();
+      return send(res, 200, stateResponse(st));
+    }
+
+    if (pathname === '/api/ducking/restore' && req.method === 'POST') {
+      return send(res, 200, { restored: ducking.restoreNow() });
+    }
+
     return send(res, 404, { error: 'not found' });
   } catch (err) {
     if (err instanceof StateUnreadableError) {
@@ -529,5 +565,14 @@ server.listen(PORT, '127.0.0.1', async () => {
     process.exit(1);
   }
   log(`panel listening on ${localUrl}`);
+  ducking.start();
   if (!noOpen) openBrowser(localUrl);
 });
+
+// Closing the helper's stdin is its signal to put back whatever it lowered, so
+// every way out of the panel stops ducking first. A hard kill skips these
+// handlers, and the helper still sees EOF and restores on its own.
+process.on('exit', () => ducking.stop());
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGBREAK']) {
+  process.on(signal, () => process.exit(0));
+}
