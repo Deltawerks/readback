@@ -53,12 +53,33 @@ test('ElevenLabs ships with a real default voice', () => {
 });
 
 // ElevenLabs recommends Flash over Turbo in all use cases.
-test('ElevenLabs defaults to Flash and still offers Turbo', () => {
+test('ElevenLabs defaults to Flash, offers v4 and drops deprecated Turbo', () => {
   assert.equal(elevenlabs.defaults.modelId, 'eleven_flash_v2_5');
   const ids = elevenlabs.models.map((m) => m.id);
   assert.ok(ids.includes('eleven_flash_v2_5'));
-  assert.ok(ids.includes('eleven_turbo_v2_5'), 'Turbo stays available');
+  assert.ok(ids.includes('eleven_v4'));
+  assert.ok(ids.includes('eleven_v4_turbo'));
+  assert.ok(!ids.includes('eleven_turbo_v2_5'), 'Turbo is deprecated');
 });
+
+test('each ElevenLabs knob appears only for the models that use it', () => {
+  const shown = (modelId) => elevenlabs.knobs.filter((k) => !k.models || k.models.includes(modelId)).map((k) => k.key);
+  assert.deepEqual(shown('eleven_v4'), ['stability', 'similarity']);
+  assert.deepEqual(shown('eleven_v3'), ['stability', 'style']);
+  assert.deepEqual(shown('eleven_turbo_v2_5'), ['speed', 'stability', 'similarity', 'style', 'speakerBoost']);
+});
+
+for (const modelId of ['eleven_v4', 'eleven_v4_turbo']) {
+  test(`${modelId} sends only stability and similarity`, async (t) => {
+    const calls = queueFetch(t, [PCM]);
+    await elevenlabs.synthesize(
+      'hi',
+      { voiceId: 'v1', modelId, speed: 1.1, similarity: 0.9, speakerBoost: true, stability: 0.4, style: 0.2 },
+      'key'
+    );
+    assert.deepEqual(calls[0].body.voice_settings, { stability: 0.4, similarity_boost: 0.9 });
+  });
+}
 
 test('the ElevenLabs model fallback matches the declared default', async (t) => {
   const calls = queueFetch(t, [PCM]);

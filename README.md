@@ -472,7 +472,8 @@ may flag them:
   lower-priced of its two TTS-2 models; TTS-2 flagship (`inworld-tts-2`) adds
   Stable, Balanced and Creative delivery modes. Flash exposes speed only;
   neither sends the obsolete temperature setting. ElevenLabs remains available
-  with its own voice and tuning controls. Check your provider's current plan
+  with its own voice and tuning controls, and defaults to Flash, its lower-priced
+  model; Eleven v4 is in the model picker. Check your provider's current plan
   before enabling speech across every project. `READBACK_MAX_CHARS` limits the
   length of each spoken reply (12,000 characters by default).
 - Trouble? Check `readback.log` in the cache folder

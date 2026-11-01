@@ -4,6 +4,17 @@ Dates are the git tag date for tagged versions. Versions that were never
 tagged (0.1.0 to 0.3.0, and the 0.6 line, which shipped inside 0.7.0) are
 dated from the commit history; 0.1.0 predates it.
 
+## Unreleased
+
+### Added
+
+- **Eleven v4 and Eleven v4 Turbo** in the ElevenLabs model picker. These models take stability and similarity only, so ReadBack sends only those two.
+
+### Changed
+
+- The ElevenLabs tuning panel now shows only the controls the selected model uses.
+- `eleven_turbo_v2_5` is no longer offered because ElevenLabs deprecated it in favor of Flash. A saved selection keeps working. Flash stays the default.
+
 ## 0.8.0 (2026-10-13)
 
 Adds an optional free voice. Nothing changes for Inworld or ElevenLabs users, and nothing new is downloaded unless you ask for it.

@@ -28,18 +28,23 @@ function clamp(value, min, max, fallback) {
 export const label = 'ElevenLabs';
 
 export const models = [
-  { id: 'eleven_turbo_v2_5', label: 'eleven_turbo_v2.5 (fast)' },
+  { id: 'eleven_v4', label: 'eleven_v4 (highest quality)' },
+  { id: 'eleven_v4_turbo', label: 'eleven_v4_turbo (expressive, fast)' },
   { id: 'eleven_v3', label: 'eleven_v3 (expressive)' },
   { id: 'eleven_multilingual_v2', label: 'eleven_multilingual_v2 (quality)' },
   { id: 'eleven_flash_v2_5', label: 'eleven_flash_v2.5 (fastest)' },
 ];
 
+// eleven_turbo_v2_5 is deprecated and no longer offered, but a saved config can
+// still name it, so its knobs stay.
+const FULL_CONTROL = ['eleven_multilingual_v2', 'eleven_flash_v2_5', 'eleven_turbo_v2_5'];
+
 export const knobs = [
-  { key: 'speed', label: 'Speed', min: 0.7, max: 1.2, step: 0.05, suffix: 'x' },
+  { key: 'speed', label: 'Speed', min: 0.7, max: 1.2, step: 0.05, suffix: 'x', models: FULL_CONTROL },
   { key: 'stability', label: 'Stability', min: 0, max: 1, step: 0.05 },
-  { key: 'similarity', label: 'Similarity', min: 0, max: 1, step: 0.05 },
-  { key: 'style', label: 'Style', min: 0, max: 1, step: 0.05, hint: 'Higher = more expressive / exaggerated' },
-  { key: 'speakerBoost', label: 'Speaker boost', type: 'toggle' },
+  { key: 'similarity', label: 'Similarity', min: 0, max: 1, step: 0.05, models: [...FULL_CONTROL, 'eleven_v4', 'eleven_v4_turbo'] },
+  { key: 'style', label: 'Style', min: 0, max: 1, step: 0.05, hint: 'Higher = more expressive / exaggerated', models: [...FULL_CONTROL, 'eleven_v3'] },
+  { key: 'speakerBoost', label: 'Speaker boost', type: 'toggle', models: FULL_CONTROL },
 ];
 
 export const defaults = {
@@ -64,14 +69,15 @@ export async function synthesize(text, cfg, apiKey) {
   const url = `${TTS_BASE}/${encodeURIComponent(cfg.voiceId)}?output_format=${OUTPUT_FORMAT}`;
   const modelId = cfg.modelId || defaults.modelId;
 
-  const voiceSettings = {
-    stability: clamp(cfg.stability, 0, 1, defaults.stability),
-    style: clamp(cfg.style, 0, 1, defaults.style),
-  };
-  // ElevenLabs documents speed, similarity and speaker boost as unavailable on
-  // the v3 models, so sending them is noise the model cannot act on.
-  if (!String(modelId).startsWith('eleven_v3')) {
-    voiceSettings.similarity_boost = clamp(cfg.similarity, 0, 1, defaults.similarity);
+  const isV3 = String(modelId).startsWith('eleven_v3');
+  const isV4 = String(modelId).startsWith('eleven_v4');
+  const voiceSettings = { stability: clamp(cfg.stability, 0, 1, defaults.stability) };
+  // ElevenLabs documents v4 as taking stability and similarity only, and v3 as
+  // lacking speed, similarity and speaker boost. Sending the rest is noise the
+  // model cannot act on.
+  if (!isV4) voiceSettings.style = clamp(cfg.style, 0, 1, defaults.style);
+  if (!isV3) voiceSettings.similarity_boost = clamp(cfg.similarity, 0, 1, defaults.similarity);
+  if (!isV3 && !isV4) {
     voiceSettings.use_speaker_boost = Boolean(cfg.speakerBoost ?? defaults.speakerBoost);
     // ElevenLabs accepts roughly 0.7 to 1.2; clamp so an out-of-range value can't 400.
     voiceSettings.speed = clamp(cfg.speed, 0.7, 1.2, defaults.speed);
